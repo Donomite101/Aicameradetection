@@ -67,9 +67,16 @@ export async function listAttendance(query: ListAttendanceQuery) {
     };
   }
   if (startDate || endDate) {
-    where.date = {};
-    if (startDate) where.date.gte = new Date(startDate);
-    if (endDate) where.date.lte = new Date(endDate);
+    const dateFilter: any = {};
+    if (startDate && !isNaN(new Date(startDate).getTime())) {
+      dateFilter.gte = new Date(startDate);
+    }
+    if (endDate && !isNaN(new Date(endDate).getTime())) {
+      dateFilter.lte = new Date(endDate);
+    }
+    if (Object.keys(dateFilter).length > 0) {
+      where.date = dateFilter;
+    }
   }
 
   const [records, total] = await Promise.all([

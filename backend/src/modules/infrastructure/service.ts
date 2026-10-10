@@ -22,9 +22,16 @@ export async function listInfrastructureChecks(query: ListInfrastructureChecksQu
     ];
   }
   if (startDate || endDate) {
-    where.timestamp = {};
-    if (startDate) where.timestamp.gte = new Date(startDate);
-    if (endDate) where.timestamp.lte = new Date(endDate);
+    const timeFilter: any = {};
+    if (startDate && !isNaN(new Date(startDate).getTime())) {
+      timeFilter.gte = new Date(startDate);
+    }
+    if (endDate && !isNaN(new Date(endDate).getTime())) {
+      timeFilter.lte = new Date(endDate);
+    }
+    if (Object.keys(timeFilter).length > 0) {
+      where.timestamp = timeFilter;
+    }
   }
 
   const [checks, total] = await Promise.all([

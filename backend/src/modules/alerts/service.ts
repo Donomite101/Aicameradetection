@@ -23,9 +23,16 @@ export async function listAlerts(query: ListAlertsQuery) {
     ];
   }
   if (startDate || endDate) {
-    where.createdAt = {};
-    if (startDate) where.createdAt.gte = new Date(startDate);
-    if (endDate) where.createdAt.lte = new Date(endDate);
+    const createdFilter: any = {};
+    if (startDate && !isNaN(new Date(startDate).getTime())) {
+      createdFilter.gte = new Date(startDate);
+    }
+    if (endDate && !isNaN(new Date(endDate).getTime())) {
+      createdFilter.lte = new Date(endDate);
+    }
+    if (Object.keys(createdFilter).length > 0) {
+      where.createdAt = createdFilter;
+    }
   }
 
   const [alerts, total] = await Promise.all([
