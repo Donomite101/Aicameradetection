@@ -18,12 +18,22 @@ import {
 export async function attendanceRoutes(app: FastifyInstance) {
   // Submit attendance record
   app.post('/', { schema: submitAttendanceSchema, preHandler: [app.authenticate] }, async (request) => {
-    return submitAttendance(request.body, request.user!.userId);
+    const user = request.user as any;
+    const body = { ...(request.body as any) };
+    if (user.role !== 'ADMIN' && user.centreId) {
+      body.centreId = user.centreId;
+    }
+    return submitAttendance(body, user.id || user.userId);
   });
 
   // List attendance records
   app.get('/', { schema: listAttendanceSchema, preHandler: [app.authenticate] }, async (request) => {
-    return listAttendance(request.query);
+    const user = request.user as any;
+    const query = { ...(request.query as any) };
+    if (user.role !== 'ADMIN' && user.centreId) {
+      query.centreId = user.centreId;
+    }
+    return listAttendance(query);
   });
 
   // Get attendance summary for a centre

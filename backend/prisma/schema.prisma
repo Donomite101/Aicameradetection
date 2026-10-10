@@ -47,6 +47,7 @@ model Centre {
   infrastructureChecks InfrastructureCheck[]
   alerts              Alert[]
   users               User[]
+  trainees            Trainee[]
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
 
@@ -181,4 +182,63 @@ model AuditLog {
   @@index([userId])
   @@index([entity, entityId])
   @@index([createdAt])
+}
+
+model Trainee {
+  id              String              @id @default(cuid())
+  centreId        String
+  centre          Centre              @relation(fields: [centreId], references: [id], onDelete: Cascade)
+  registrationNo  String              @unique
+  fullName        String
+  email           String?
+  phone           String?
+  gender          String?             // MALE, FEMALE, OTHER
+  dateOfBirth     DateTime?
+  aadhaarLast4    String?
+  courseName      String?
+  batchName       String?
+  schemeCode      String?
+  status          String              @default("ACTIVE") // ACTIVE, COMPLETED, DROPOUT, SUSPENDED
+  photoUrl        String?
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  attendance      TraineeAttendance[]
+
+  @@index([centreId])
+  @@index([registrationNo])
+  @@index([status])
+}
+
+model TraineeAttendance {
+  id          String   @id @default(cuid())
+  traineeId   String
+  trainee     Trainee  @relation(fields: [traineeId], references: [id], onDelete: Cascade)
+  centreId    String
+  date        DateTime
+  session     String   // MORNING, AFTERNOON, EVENING, FULL_DAY
+  status      String   @default("PRESENT") // PRESENT, ABSENT, LEAVE
+  markedBy    String?  // User ID who marked
+  remarks     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([traineeId, date, session])
+  @@index([centreId, date])
+  @@index([traineeId])
+}
+
+model Scheme {
+  id                  String   @id @default(cuid())
+  code                String   @unique
+  name                String
+  description         String?
+  ministry            String?  // e.g. Ministry of Skill Development and Entrepreneurship
+  fundingType         String?  // CENTRAL, STATE, PPP
+  targetBeneficiaries Int?
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([code])
 }

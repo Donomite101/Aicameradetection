@@ -20,19 +20,54 @@ async function main() {
   });
   console.log('✅ Created admin user:', admin.email);
 
-  // Create monitoring officer
-  const officerPassword = await bcrypt.hash('officer123', 12);
-  const officer = await prisma.user.upsert({
-    where: { email: 'officer@sih.gov.in' },
-    update: { passwordHash: officerPassword },
-    create: {
-      email: 'officer@sih.gov.in',
-      passwordHash: officerPassword,
-      fullName: 'Monitoring Officer',
-      role: 'MONITORING_OFFICER',
+  // Seed Schemes
+  const schemesData = [
+    {
+      code: 'PMKVY-4.0',
+      name: 'Pradhan Mantri Kaushal Vikas Yojana 4.0',
+      description: 'Flagship scheme of MSDE to provide industry-relevant skill training for Indian youth.',
+      ministry: 'Ministry of Skill Development and Entrepreneurship',
+      fundingType: 'CENTRAL',
+      targetBeneficiaries: 1500000,
+      isActive: true,
     },
-  });
-  console.log('✅ Created monitoring officer:', officer.email);
+    {
+      code: 'DDU-GKY',
+      name: 'Deen Dayal Upadhyaya Grameen Kaushalya Yojana',
+      description: 'Placement-linked skill training initiative for rural poor youth.',
+      ministry: 'Ministry of Rural Development',
+      fundingType: 'CENTRAL_STATE',
+      targetBeneficiaries: 800000,
+      isActive: true,
+    },
+    {
+      code: 'PM-VISHWAKARMA',
+      name: 'PM Vishwakarma Scheme',
+      description: 'Holistic end-to-end support to artisans and craftspeople.',
+      ministry: 'Ministry of Micro, Small and Medium Enterprises',
+      fundingType: 'CENTRAL',
+      targetBeneficiaries: 3000000,
+      isActive: true,
+    },
+    {
+      code: 'DAY-NULM',
+      name: 'Deendayal Antyodaya Yojana - National Urban Livelihoods Mission',
+      description: 'Skill training and self-employment for urban poor.',
+      ministry: 'Ministry of Housing and Urban Affairs',
+      fundingType: 'CENTRAL_STATE',
+      targetBeneficiaries: 500000,
+      isActive: true,
+    },
+  ];
+
+  for (const s of schemesData) {
+    await prisma.scheme.upsert({
+      where: { code: s.code },
+      update: s,
+      create: s,
+    });
+  }
+  console.log('✅ Seeded schemes');
 
   // Create sample centres
   const centres = [
@@ -243,6 +278,123 @@ async function main() {
         },
       }).catch(() => {});
     }
+  }
+
+  // Create/update monitoring officer assigned to Delhi centre
+  const delhiCentre = await prisma.centre.findUnique({ where: { code: 'TC-DEL-001' } });
+  const officerPassword = await bcrypt.hash('officer123', 12);
+  const officer = await prisma.user.upsert({
+    where: { email: 'officer@sih.gov.in' },
+    update: {
+      passwordHash: officerPassword,
+      centreId: delhiCentre?.id,
+      role: 'MONITORING_OFFICER',
+    },
+    create: {
+      email: 'officer@sih.gov.in',
+      passwordHash: officerPassword,
+      fullName: 'Monitoring Officer',
+      role: 'MONITORING_OFFICER',
+      centreId: delhiCentre?.id,
+    },
+  });
+  console.log('✅ Created/Updated monitoring officer with Delhi Centre:', officer.email);
+
+  // Seed sample trainees for Delhi Centre
+  if (delhiCentre) {
+    const sampleTrainees = [
+      {
+        registrationNo: 'TRN-DEL-001',
+        fullName: 'Aarav Sharma',
+        email: 'aarav.sharma@example.com',
+        phone: '9876543210',
+        gender: 'MALE',
+        aadhaarLast4: '4123',
+        courseName: 'Solar Panel Installation Technician',
+        batchName: 'Batch 2026-A',
+        schemeCode: 'PMKVY-4.0',
+        status: 'ACTIVE',
+      },
+      {
+        registrationNo: 'TRN-DEL-002',
+        fullName: 'Pooja Verma',
+        email: 'pooja.verma@example.com',
+        phone: '9876543211',
+        gender: 'FEMALE',
+        aadhaarLast4: '8892',
+        courseName: 'Electrician & Domestic Appliances',
+        batchName: 'Batch 2026-A',
+        schemeCode: 'PMKVY-4.0',
+        status: 'ACTIVE',
+      },
+      {
+        registrationNo: 'TRN-DEL-003',
+        fullName: 'Mohammad Imran',
+        email: 'imran.m@example.com',
+        phone: '9876543212',
+        gender: 'MALE',
+        aadhaarLast4: '5561',
+        courseName: 'CNC Machine Operator',
+        batchName: 'Batch 2026-B',
+        schemeCode: 'PMKVY-4.0',
+        status: 'ACTIVE',
+      },
+      {
+        registrationNo: 'TRN-DEL-004',
+        fullName: 'Neha Gupta',
+        email: 'neha.gupta@example.com',
+        phone: '9876543213',
+        gender: 'FEMALE',
+        aadhaarLast4: '1092',
+        courseName: 'Data Entry & Office Automation',
+        batchName: 'Batch 2026-B',
+        schemeCode: 'DDU-GKY',
+        status: 'ACTIVE',
+      },
+      {
+        registrationNo: 'TRN-DEL-005',
+        fullName: 'Rohan Mehra',
+        email: 'rohan.m@example.com',
+        phone: '9876543214',
+        gender: 'MALE',
+        aadhaarLast4: '9812',
+        courseName: 'Solar Panel Installation Technician',
+        batchName: 'Batch 2026-A',
+        schemeCode: 'PMKVY-4.0',
+        status: 'ACTIVE',
+      },
+    ];
+
+    for (const trn of sampleTrainees) {
+      const trainee = await prisma.trainee.upsert({
+        where: { registrationNo: trn.registrationNo },
+        update: { ...trn, centreId: delhiCentre.id },
+        create: { ...trn, centreId: delhiCentre.id },
+      });
+
+      // Add today's attendance for each trainee
+      const todayDate = new Date();
+      todayDate.setUTCHours(0, 0, 0, 0);
+      await prisma.traineeAttendance.upsert({
+        where: {
+          traineeId_date_session: {
+            traineeId: trainee.id,
+            date: todayDate,
+            session: 'FULL_DAY',
+          },
+        },
+        update: { status: 'PRESENT' },
+        create: {
+          traineeId: trainee.id,
+          centreId: delhiCentre.id,
+          date: todayDate,
+          session: 'FULL_DAY',
+          status: 'PRESENT',
+          markedBy: officer.id,
+        },
+      });
+    }
+    console.log('✅ Seeded trainees and attendance for Delhi Centre');
   }
 
   // Create system config

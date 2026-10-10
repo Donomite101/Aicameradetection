@@ -113,8 +113,8 @@ export function AlertsPage() {
     );
   }
 
-  const alerts = data?.data || [];
-  const pagination = data?.pagination;
+  const alerts: any[] = (data as any)?.data || [];
+  const pagination = (data as any)?.pagination;
 
   return (
     <div className="space-y-6">

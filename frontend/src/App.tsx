@@ -9,6 +9,9 @@ import { AlertsPage } from '@/pages/Alerts';
 import { MapPage } from '@/pages/Map';
 import { AnalyticsPage } from '@/pages/Analytics';
 import { SettingsPage } from '@/pages/Settings';
+import { SchemesPage } from '@/pages/Schemes';
+import { OfficersPage } from '@/pages/Officers';
+import { TraineesPage } from '@/pages/Trainees';
 import { LoginPage } from '@/pages/Login';
 import { useAuthStore } from '@/store/auth';
 
@@ -83,6 +86,9 @@ export function App() {
       <Route element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/centres" element={<CentresPage />} />
+        <Route path="/schemes" element={<SchemesPage />} />
+        <Route path="/officers" element={<OfficersPage />} />
+        <Route path="/trainees" element={<TraineesPage />} />
         <Route path="/attendance" element={<AttendancePage />} />
         <Route path="/infrastructure" element={<InfrastructurePage />} />
         <Route path="/alerts" element={<AlertsPage />} />

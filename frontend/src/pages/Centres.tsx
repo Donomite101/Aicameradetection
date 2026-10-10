@@ -252,7 +252,7 @@ export function CentresPage() {
                   label="Pincode"
                   type="text"
                   error={form.formState.errors.pincode?.message}
-                  {...form.register('pincode', { valueAsString: true })}
+                  {...form.register('pincode')}
                 />
                 <Input
                   label="Latitude"
@@ -360,7 +360,7 @@ export function CentresPage() {
                   </TableCell>
                 </TableRow>
               ) : (
-                centres.map((centre) => (
+                centres.map((centre: any) => (
                   <TableRow key={centre.id}>
                     <TableCell>
                       <div className="flex items-center gap-3">
@@ -387,7 +387,7 @@ export function CentresPage() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={statusColors[centre.status] || 'secondary'}>
+                      <Badge variant={(statusColors[centre.status] as any) || 'secondary'}>
                         {centre.status.replace('_', ' ')}
                       </Badge>
                     </TableCell>

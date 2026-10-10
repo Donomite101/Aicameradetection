@@ -2,8 +2,12 @@ import { prisma } from '@/shared/database/prisma';
 import { DashboardSummaryQuery, CentresMapQuery, AttendanceTrendsQuery, InfrastructureComplianceQuery } from './schemas';
 
 export async function getDashboardSummary(query: DashboardSummaryQuery) {
-  const { days } = query;
+  const { days, centreId } = query;
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+  const cameraWhere: any = centreId ? { centreId } : {};
+  const alertWhere: any = centreId ? { centreId, createdAt: { gte: since } } : { createdAt: { gte: since } };
+  const attendanceWhere: any = centreId ? { centreId, date: { gte: since } } : { date: { gte: since } };
 
   const [
     totalCentres,
@@ -16,43 +20,49 @@ export async function getDashboardSummary(query: DashboardSummaryQuery) {
     criticalAlerts,
     recentAttendance,
     recentAlerts,
+    centreDetails,
+    totalTrainees,
   ] = await Promise.all([
-    prisma.centre.count(),
-    prisma.centre.count({ where: { status: 'ACTIVE' } }),
-    prisma.camera.count(),
-    prisma.camera.count({ where: { isActive: true, lastSeenAt: { gte: since } } }),
-    prisma.attendanceRecord.count({ where: { date: { gte: since } } }),
-    prisma.alert.count({ where: { createdAt: { gte: since } } }),
-    prisma.alert.count({ where: { status: 'OPEN', createdAt: { gte: since } } }),
-    prisma.alert.count({ where: { severity: 'CRITICAL', status: 'OPEN', createdAt: { gte: since } } }),
+    centreId ? 1 : prisma.centre.count(),
+    centreId ? 1 : prisma.centre.count({ where: { status: 'ACTIVE' } }),
+    prisma.camera.count({ where: cameraWhere }),
+    prisma.camera.count({ where: { ...cameraWhere, isActive: true, lastSeenAt: { gte: since } } }),
+    prisma.attendanceRecord.count({ where: attendanceWhere }),
+    prisma.alert.count({ where: alertWhere }),
+    prisma.alert.count({ where: { ...alertWhere, status: 'OPEN' } }),
+    prisma.alert.count({ where: { ...alertWhere, severity: 'CRITICAL', status: 'OPEN' } }),
     prisma.attendanceRecord.findMany({
-      where: { date: { gte: since } },
+      where: attendanceWhere,
       orderBy: { date: 'desc' },
       take: 10,
       include: { centre: { select: { id: true, name: true, code: true } } },
     }),
     prisma.alert.findMany({
-      where: { createdAt: { gte: since } },
+      where: alertWhere,
       orderBy: { createdAt: 'desc' },
       take: 10,
       include: { centre: { select: { id: true, name: true, code: true } } },
     }),
+    centreId ? prisma.centre.findUnique({ where: { id: centreId } }) : Promise.resolve(null),
+    centreId ? prisma.trainee.count({ where: { centreId } }) : prisma.trainee.count(),
   ]);
 
   // Attendance discrepancy stats
   const discrepancyStats = await prisma.attendanceRecord.groupBy({
     by: ['status'],
-    where: { date: { gte: since } },
+    where: attendanceWhere,
     _count: true,
   });
 
   return {
+    centre: centreDetails,
     overview: {
       totalCentres,
       activeCentres,
       totalCameras,
       onlineCameras,
       cameraUptime: totalCameras > 0 ? Math.round((onlineCameras / totalCameras) * 100) : 0,
+      totalTrainees,
     },
     attendance: {
       totalRecords: totalAttendanceRecords,

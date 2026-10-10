@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const dashboardSummarySchema = z.object({
   query: z.object({
     days: z.coerce.number().int().positive().default(30),
+    centreId: z.string().optional(),
   }),
 });
 

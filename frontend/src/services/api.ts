@@ -4,7 +4,7 @@ import { getAuthTokens, setAuthTokens, clearAuthTokens } from '@/store/auth';
 const API_URL = import.meta.env.VITE_API_URL || 'https://sterility-upheld-attic.ngrok-free.dev';
 const API_PREFIX = '/api/v1';
 
-export const api = axios.create({
+export const api: any = axios.create({
   baseURL: `${API_URL}${API_PREFIX}`,
   headers: {
     'Content-Type': 'application/json',
@@ -34,7 +34,7 @@ api.interceptors.request.use(
 
     return config;
   },
-  (error) => Promise.reject(error)
+  (error: any) => Promise.reject(error)
 );
 
 // Response interceptor for token refresh
@@ -56,7 +56,7 @@ const processQueue = (error: Error | null, token: string | null = null) => {
 };
 
 api.interceptors.response.use(
-  (response) => response.data,
+  (response: any) => response.data,
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
 
@@ -179,4 +179,31 @@ export const dashboardApi = {
   attendanceTrends: (params?: Record<string, unknown>) => api.get('/dashboard/attendance/trends', { params }),
   infrastructureCompliance: (params?: Record<string, unknown>) =>
     api.get('/dashboard/infrastructure/compliance', { params }),
+};
+
+export const schemesApi = {
+  list: (params?: Record<string, unknown>) => api.get('/schemes', { params }),
+  get: (id: string) => api.get(`/schemes/${id}`),
+  create: (data: Record<string, unknown>) => api.post('/schemes', data),
+  update: (id: string, data: Record<string, unknown>) => api.patch(`/schemes/${id}`, data),
+  delete: (id: string) => api.delete(`/schemes/${id}`),
+};
+
+export const officersApi = {
+  list: (params?: Record<string, unknown>) => api.get('/officers', { params }),
+  get: (id: string) => api.get(`/officers/${id}`),
+  create: (data: Record<string, unknown>) => api.post('/officers', data),
+  update: (id: string, data: Record<string, unknown>) => api.patch(`/officers/${id}`, data),
+  delete: (id: string) => api.delete(`/officers/${id}`),
+};
+
+export const traineesApi = {
+  list: (params?: Record<string, unknown>) => api.get('/trainees', { params }),
+  get: (id: string) => api.get(`/trainees/${id}`),
+  create: (data: Record<string, unknown>) => api.post('/trainees', data),
+  update: (id: string, data: Record<string, unknown>) => api.patch(`/trainees/${id}`, data),
+  delete: (id: string) => api.delete(`/trainees/${id}`),
+  markAttendance: (data: { date?: string; session?: string; records: Array<{ traineeId: string; status: string; remarks?: string }> }) =>
+    api.post('/trainees/attendance', data),
+  getAttendance: (params?: Record<string, unknown>) => api.get('/trainees/attendance', { params }),
 };

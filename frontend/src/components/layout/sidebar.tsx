@@ -14,29 +14,50 @@ import {
   Settings,
   LogOut,
   Menu,
-  X,
   ChevronLeft,
   ChevronRight,
+  Award,
+  ShieldCheck,
+  GraduationCap,
 } from 'lucide-react';
 import { useAuthStore } from '@/store/auth';
 import { Button } from '@/components/ui/button';
-
-const navigation = [
-  { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-  { name: 'Centres', href: '/centres', icon: Building2 },
-  { name: 'Attendance', href: '/attendance', icon: Users },
-  { name: 'Infrastructure', href: '/infrastructure', icon: HardHat },
-  { name: 'Alerts', href: '/alerts', icon: AlertTriangle },
-  { name: 'Map View', href: '/map', icon: MapPin },
-  { name: 'Analytics', href: '/analytics', icon: BarChart3 },
-  { name: 'Settings', href: '/settings', icon: Settings },
-];
 
 export function Sidebar() {
   const location = useLocation();
   const { user, clearAuth } = useAuthStore();
   const [collapsed, setCollapsed] = React.useState(false);
   const [mobileOpen, setMobileOpen] = React.useState(false);
+
+  const isAdmin = user?.role === 'ADMIN';
+
+  const navigation = React.useMemo(() => {
+    if (isAdmin) {
+      return [
+        { name: 'Dashboard', href: '/', icon: LayoutDashboard },
+        { name: 'Centres', href: '/centres', icon: Building2 },
+        { name: 'Schemes', href: '/schemes', icon: Award },
+        { name: 'Officers', href: '/officers', icon: ShieldCheck },
+        { name: 'Trainees', href: '/trainees', icon: GraduationCap },
+        { name: 'Attendance', href: '/attendance', icon: Users },
+        { name: 'Infrastructure', href: '/infrastructure', icon: HardHat },
+        { name: 'Alerts', href: '/alerts', icon: AlertTriangle },
+        { name: 'Map View', href: '/map', icon: MapPin },
+        { name: 'Analytics', href: '/analytics', icon: BarChart3 },
+        { name: 'Settings', href: '/settings', icon: Settings },
+      ];
+    }
+
+    // Site / Monitoring Officer navigation
+    return [
+      { name: 'My Centre', href: '/', icon: LayoutDashboard },
+      { name: 'Trainees', href: '/trainees', icon: GraduationCap },
+      { name: 'Track Attendance', href: '/attendance', icon: Users },
+      { name: 'Infrastructure', href: '/infrastructure', icon: HardHat },
+      { name: 'Alerts', href: '/alerts', icon: AlertTriangle },
+      { name: 'Settings', href: '/settings', icon: Settings },
+    ];
+  }, [isAdmin]);
 
   const handleLogout = () => {
     clearAuth();
@@ -120,7 +141,16 @@ export function Sidebar() {
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium truncate">{user.fullName}</p>
-                <p className="text-xs text-muted-foreground truncate capitalize">{user.role.replace('_', ' ').toLowerCase()}</p>
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="text-xs text-muted-foreground truncate capitalize">
+                    {user.role.replace('_', ' ').toLowerCase()}
+                  </span>
+                  {(user.centre?.code || user.centreId) && (
+                    <span className="text-[10px] bg-primary/15 text-primary px-1.5 py-0.5 rounded font-mono font-semibold">
+                      {user.centre?.code || 'Assigned Site'}
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
           )}

@@ -22,6 +22,9 @@ import { attendanceRoutes } from '@/modules/attendance/routes';
 import { infrastructureRoutes } from '@/modules/infrastructure/routes';
 import { alertRoutes } from '@/modules/alerts/routes';
 import { dashboardRoutes } from '@/modules/dashboard/routes';
+import { schemeRoutes } from '@/modules/schemes/routes';
+import { officerRoutes } from '@/modules/officers/routes';
+import { traineeRoutes } from '@/modules/trainees/routes';
 
 export async function buildApp(): Promise<fastify.FastifyInstance> {
   const app = fastify({
@@ -121,6 +124,9 @@ export async function buildApp(): Promise<fastify.FastifyInstance> {
   await app.register(infrastructureRoutes, { prefix: `${config.API_PREFIX}/infrastructure` });
   await app.register(alertRoutes, { prefix: `${config.API_PREFIX}/alerts` });
   await app.register(dashboardRoutes, { prefix: `${config.API_PREFIX}/dashboard` });
+  await app.register(schemeRoutes, { prefix: `${config.API_PREFIX}/schemes` });
+  await app.register(officerRoutes, { prefix: `${config.API_PREFIX}/officers` });
+  await app.register(traineeRoutes, { prefix: `${config.API_PREFIX}/trainees` });
 
   // Global error handler
   app.setErrorHandler((error, request, reply) => {

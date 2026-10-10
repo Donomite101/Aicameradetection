@@ -165,7 +165,7 @@ export function MapPage() {
     );
   }
 
-  const centres = (Array.isArray(data) ? data : (data as any)?.data) || [];
+  const centres: CentreMapData[] = (Array.isArray(data) ? data : (data as any)?.data) || [];
 
   return (
     <div className="space-y-6">
@@ -252,13 +252,13 @@ export function MapPage() {
             ) : (
               <div className="max-h-[500px] overflow-y-auto">
                 <ul className="divide-y" role="list">
-                  {centres.map((centre) => (
+                  {centres.map((centre: any) => (
                     <li key={centre.id}>
                       <button
                         onClick={() => setSelectedCentre(centre)}
                         className={cn(
                           'w-full p-4 text-left hover:bg-accent transition-colors flex items-center gap-3',
-                          selectedCentre?.id === centre.id && 'bg-accent'
+                          (selectedCentre as any)?.id === centre.id && 'bg-accent'
                         )}
                       >
                         <div className={cn('h-10 w-10 rounded-full flex items-center justify-center', 

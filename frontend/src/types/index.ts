@@ -206,3 +206,58 @@ export interface AlertStats {
   bySeverity: Record<string, number>;
   byType: Record<string, number>;
 }
+
+export interface Scheme {
+  id: string;
+  code: string;
+  name: string;
+  description?: string;
+  ministry?: string;
+  fundingType?: string;
+  targetBeneficiaries?: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Trainee {
+  id: string;
+  centreId: string;
+  centre?: Centre;
+  registrationNo: string;
+  fullName: string;
+  email?: string;
+  phone?: string;
+  gender?: 'MALE' | 'FEMALE' | 'OTHER';
+  dateOfBirth?: string;
+  aadhaarLast4?: string;
+  courseName?: string;
+  batchName?: string;
+  schemeCode?: string;
+  status: 'ACTIVE' | 'COMPLETED' | 'DROPOUT' | 'SUSPENDED';
+  photoUrl?: string;
+  createdAt: string;
+  updatedAt: string;
+  attendance?: TraineeAttendanceRecord[];
+}
+
+export interface TraineeAttendanceRecord {
+  id: string;
+  traineeId: string;
+  trainee?: {
+    id: string;
+    fullName: string;
+    registrationNo: string;
+    batchName?: string;
+    courseName?: string;
+    photoUrl?: string;
+  };
+  centreId: string;
+  date: string;
+  session: AttendanceSession;
+  status: 'PRESENT' | 'ABSENT' | 'LEAVE';
+  markedBy?: string;
+  remarks?: string;
+  createdAt: string;
+  updatedAt: string;
+}

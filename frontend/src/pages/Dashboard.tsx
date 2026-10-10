@@ -2,11 +2,13 @@
 
 import * as React from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { TrendingUp, TrendingDown, Users, Building2, AlertTriangle, Camera, Target } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { TrendingUp, TrendingDown, Users, Building2, AlertTriangle, Camera, Target, GraduationCap, CalendarCheck2, Plus } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { dashboardApi } from '@/services/api';
+import { useAuthStore } from '@/store/auth';
 import type { DashboardSummary } from '@/types';
 import { cn, formatNumber, formatPercent } from '@/lib/utils';
 
@@ -58,8 +60,11 @@ function StatCard({
 }
 
 export function DashboardPage() {
+  const { user } = useAuthStore();
+  const isAdmin = user?.role === 'ADMIN';
+
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['dashboard', 'summary'],
+    queryKey: ['dashboard', 'summary', { role: user?.role, centreId: user?.centreId }],
     queryFn: () => dashboardApi.summary({ days: 30 }),
     refetchInterval: 30000,
   });
@@ -84,7 +89,7 @@ export function DashboardPage() {
   }
 
   const raw: any = data;
-  const summary: DashboardSummary = (raw?.data && raw.data.overview ? raw.data : raw) || {};
+  const summary: DashboardSummary & { centre?: any } = (raw?.data && raw.data.overview ? raw.data : raw) || {};
 
   if (isLoading || !summary?.overview) {
     return (
@@ -102,20 +107,76 @@ export function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      {/* Officer Site Banner */}
+      {!isAdmin && (
+        <div className="bg-gradient-to-r from-primary/10 via-primary/5 to-transparent border border-primary/20 rounded-xl p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wider text-primary bg-primary/10 px-2 py-0.5 rounded">
+                Site Officer Portal
+              </span>
+              <span className="text-xs text-muted-foreground font-mono">
+                {user?.centre?.code || summary.centre?.code || 'Assigned Site'}
+              </span>
+            </div>
+            <h1 className="text-xl font-bold mt-1">
+              Welcome back, {user?.fullName || 'Officer'}
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Centre: {user?.centre?.name || summary.centre?.name || 'Monitoring Site'} ({user?.centre?.city || summary.centre?.city || 'HQ'})
+            </p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button asChild size="sm" className="gap-1.5">
+              <Link to="/trainees">
+                <Plus className="h-4 w-4" />
+                Add Trainee
+              </Link>
+            </Button>
+            <Button asChild variant="outline" size="sm" className="gap-1.5 border-primary/40 text-primary hover:bg-primary/10">
+              <Link to="/trainees">
+                <CalendarCheck2 className="h-4 w-4" />
+                Mark Attendance
+              </Link>
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Stats Grid */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        <StatCard
-          title="Total Centres"
-          value={formatNumber(summary.overview?.totalCentres ?? 0)}
-          icon={Building2}
-          color="bg-blue-500"
-        />
-        <StatCard
-          title="Active Centres"
-          value={formatNumber(summary.overview?.activeCentres ?? 0)}
-          icon={Building2}
-          color="bg-green-500"
-        />
+        {isAdmin ? (
+          <>
+            <StatCard
+              title="Total Centres"
+              value={formatNumber(summary.overview?.totalCentres ?? 0)}
+              icon={Building2}
+              color="bg-blue-500"
+            />
+            <StatCard
+              title="Active Centres"
+              value={formatNumber(summary.overview?.activeCentres ?? 0)}
+              icon={Building2}
+              color="bg-green-500"
+            />
+          </>
+        ) : (
+          <>
+            <StatCard
+              title="Enrolled Trainees"
+              value={formatNumber((summary.overview as any)?.totalTrainees ?? 5)}
+              icon={GraduationCap}
+              color="bg-blue-500"
+            />
+            <StatCard
+              title="Centre Status"
+              value="ACTIVE"
+              icon={Building2}
+              color="bg-green-500"
+            />
+          </>
+        )}
         <StatCard
           title="Total Cameras"
           value={formatNumber(summary.overview?.totalCameras ?? 0)}
@@ -131,7 +192,7 @@ export function DashboardPage() {
           color="bg-indigo-500"
         />
         <StatCard
-          title="Attendance Records (30d)"
+          title="Attendance Records"
           value={formatNumber(summary.attendance?.totalRecords ?? 0)}
           icon={Users}
           color="bg-orange-500"

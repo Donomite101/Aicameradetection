@@ -79,9 +79,10 @@ export function InfrastructurePage() {
     );
   }
 
-  const checks = checksData?.data || [];
-  const pagination = checksData?.pagination;
-  const compliance = complianceData;
+  const rawChecks: any = checksData;
+  const checks = rawChecks?.data || [];
+  const pagination = rawChecks?.pagination;
+  const compliance: any = complianceData;
 
   return (
     <div className="space-y-6">
@@ -127,7 +128,7 @@ export function InfrastructurePage() {
       )}
 
       {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+      <Tabs value={activeTab} onValueChange={(val: string) => setActiveTab(val as any)} className="w-full">
         <TabsList>
           <TabsTrigger value="checks">Recent Checks</TabsTrigger>
           <TabsTrigger value="compliance">Compliance by Category</TabsTrigger>
@@ -197,7 +198,7 @@ export function InfrastructurePage() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    checks.map((check) => {
+                    (checks as any[]).map((check: any) => {
                       const config = operabilityConfig[check.operability] || { variant: 'secondary', icon: Monitor };
                       const Icon = config.icon;
                       const CategoryIcon = categoryIcons[check.item?.category || 'OTHER'] || Package;
@@ -279,7 +280,7 @@ export function InfrastructurePage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {Object.entries(compliance.byCategory).map(([category, stats]) => {
+                  {Object.entries((compliance?.byCategory as Record<string, any>) || {}).map(([category, stats]: [string, any]) => {
                     const CategoryIcon = categoryIcons[category] || Package;
                     const rate = stats.total > 0 ? Math.round((stats.functional / stats.total) * 100) : 0;
                     return (

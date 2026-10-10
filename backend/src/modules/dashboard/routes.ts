@@ -5,7 +5,12 @@ import { getDashboardSummary, getCentresForMap, getAttendanceTrends, getInfrastr
 export async function dashboardRoutes(app: FastifyInstance) {
   // Dashboard summary
   app.get('/summary', { schema: dashboardSummarySchema, preHandler: [app.authenticate] }, async (request) => {
-    return getDashboardSummary(request.query);
+    const user = request.user as any;
+    const query = { ...(request.query as any) };
+    if (user.role !== 'ADMIN' && user.centreId) {
+      query.centreId = user.centreId;
+    }
+    return getDashboardSummary(query);
   });
 
   // Centres for map view
