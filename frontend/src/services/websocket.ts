@@ -2,7 +2,7 @@ import { io, Socket } from 'socket.io-client';
 import { getAuthTokens } from '@/store/auth';
 import { useAuthStore } from '@/store/auth';
 
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3000';
+const WS_URL = import.meta.env.VITE_WS_URL || 'https://sterility-upheld-attic.ngrok-free.dev';
 
 class WebSocketService {
   private socket: Socket | null = null;
@@ -18,6 +18,9 @@ class WebSocketService {
       path: '/ws',
       auth: { token: tokens?.accessToken },
       transports: ['websocket', 'polling'],
+      extraHeaders: {
+        'ngrok-skip-browser-warning': 'true',
+      },
       reconnection: true,
       reconnectionAttempts: this.maxReconnectAttempts,
       reconnectionDelay: 1000,

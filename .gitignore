@@ -77,3 +77,4 @@ nginx/
 
 # ngrok binary
 ngrok.exe
+backend/ngrok.exe

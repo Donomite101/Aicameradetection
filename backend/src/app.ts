@@ -47,9 +47,10 @@ export async function buildApp(): Promise<fastify.FastifyInstance> {
 
   // CORS
   await app.register(fastifyCors, {
-    origin: config.NODE_ENV === 'production' ? false : true,
+    origin: true,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'ngrok-skip-browser-warning', 'x-requested-with', 'Accept'],
   });
 
   // Rate limiting

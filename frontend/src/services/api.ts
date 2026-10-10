@@ -1,13 +1,14 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { getAuthTokens, setAuthTokens, clearAuthTokens } from '@/store/auth';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+const API_URL = import.meta.env.VITE_API_URL || 'https://sterility-upheld-attic.ngrok-free.dev';
 const API_PREFIX = '/api/v1';
 
 export const api = axios.create({
   baseURL: `${API_URL}${API_PREFIX}`,
   headers: {
     'Content-Type': 'application/json',
+    'ngrok-skip-browser-warning': 'true',
   },
   timeout: 30000,
 });
@@ -15,6 +16,7 @@ export const api = axios.create({
 // Request interceptor to add auth token and sanitize query params
 api.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
+    config.headers['ngrok-skip-browser-warning'] = 'true';
     const tokens = getAuthTokens();
     if (tokens?.accessToken) {
       config.headers.Authorization = `Bearer ${tokens.accessToken}`;
