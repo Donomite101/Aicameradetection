@@ -47,12 +47,21 @@ export async function getAttendanceById(id: string) {
 
 export async function listAttendance(query: ListAttendanceQuery) {
   const { page, limit, centreId, startDate, endDate, session, status, sortBy, sortOrder } = query;
+  const search = (query as any).search;
   const skip = (page - 1) * limit;
 
   const where: any = {};
   if (centreId) where.centreId = centreId;
   if (session) where.session = session;
   if (status) where.status = status;
+  if (search) {
+    where.centre = {
+      OR: [
+        { name: { contains: search } },
+        { code: { contains: search } },
+      ],
+    };
+  }
   if (startDate || endDate) {
     where.date = {};
     if (startDate) where.date.gte = new Date(startDate);

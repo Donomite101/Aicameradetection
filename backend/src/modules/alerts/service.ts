@@ -3,6 +3,7 @@ import { ListAlertsQuery, UpdateAlertInput } from './schemas';
 
 export async function listAlerts(query: ListAlertsQuery) {
   const { page, limit, centreId, type, severity, status, startDate, endDate, sortBy, sortOrder } = query;
+  const search = (query as any).search;
   const skip = (page - 1) * limit;
 
   const where: any = {};
@@ -10,6 +11,13 @@ export async function listAlerts(query: ListAlertsQuery) {
   if (type) where.type = type;
   if (severity) where.severity = severity;
   if (status) where.status = status;
+  if (search) {
+    where.OR = [
+      { title: { contains: search } },
+      { message: { contains: search } },
+      { centre: { name: { contains: search } } },
+    ];
+  }
   if (startDate || endDate) {
     where.createdAt = {};
     if (startDate) where.createdAt.gte = new Date(startDate);

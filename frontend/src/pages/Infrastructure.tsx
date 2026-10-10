@@ -16,7 +16,7 @@ import {
   TableHead,
   TableCell,
 } from '@/components/ui/table';
-import { infrastructureApi } from '@/services/api';
+import { infrastructureApi, dashboardApi } from '@/services/api';
 import type { InfrastructureCheck, PaginatedResponse } from '@/types';
 import { cn, formatPercent } from '@/lib/utils';
 import {
@@ -64,7 +64,7 @@ export function InfrastructurePage() {
 
   const { data: complianceData, isLoading: complianceLoading } = useQuery({
     queryKey: ['infrastructure', 'compliance'],
-    queryFn: () => infrastructureApi.compliance(''),
+    queryFn: () => dashboardApi.infrastructureCompliance(),
   });
 
   if (checksLoading && activeTab === 'checks') {

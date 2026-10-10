@@ -12,13 +12,24 @@ export const api = axios.create({
   timeout: 30000,
 });
 
-// Request interceptor to add auth token
+// Request interceptor to add auth token and sanitize query params
 api.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     const tokens = getAuthTokens();
     if (tokens?.accessToken) {
       config.headers.Authorization = `Bearer ${tokens.accessToken}`;
     }
+
+    if (config.params && typeof config.params === 'object') {
+      const sanitized: Record<string, unknown> = {};
+      for (const [key, val] of Object.entries(config.params)) {
+        if (val !== '' && val !== null && val !== undefined) {
+          sanitized[key] = val;
+        }
+      }
+      config.params = sanitized;
+    }
+
     return config;
   },
   (error) => Promise.reject(error)

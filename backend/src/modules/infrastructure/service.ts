@@ -3,6 +3,7 @@ import { ListInfrastructureChecksQuery } from './schemas';
 
 export async function listInfrastructureChecks(query: ListInfrastructureChecksQuery) {
   const { page, limit, centreId, itemId, detected, operability, startDate, endDate, sortBy, sortOrder } = query;
+  const search = (query as any).search;
   const skip = (page - 1) * limit;
 
   const where: any = {};
@@ -10,6 +11,12 @@ export async function listInfrastructureChecks(query: ListInfrastructureChecksQu
   if (itemId) where.itemId = itemId;
   if (detected !== undefined) where.detected = detected;
   if (operability) where.operability = operability;
+  if (search) {
+    where.OR = [
+      { item: { name: { contains: search } } },
+      { centre: { name: { contains: search } } },
+    ];
+  }
   if (startDate || endDate) {
     where.timestamp = {};
     if (startDate) where.timestamp.gte = new Date(startDate);
