@@ -7,19 +7,12 @@ import { Header } from './header';
 import { cn } from '@/lib/utils';
 
 export function MainLayout() {
-  const [sidebarCollapsed, setSidebarCollapsed] = React.useState(false);
-
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background flex">
       <Sidebar />
-      <div
-        className={cn(
-          'transition-all duration-300 lg:transition-all',
-          sidebarCollapsed ? 'lg:ml-16' : 'lg:ml-64'
-        )}
-      >
+      <div className="flex-1 flex flex-col min-w-0">
         <Header />
-        <main className="p-4 lg:p-6">
+        <main className="flex-1 p-4 lg:p-6">
           <Outlet />
         </main>
       </div>
