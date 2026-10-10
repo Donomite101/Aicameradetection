@@ -2,9 +2,13 @@ import { prisma } from '@/shared/database/prisma';
 import { ListInfrastructureChecksQuery } from './schemas';
 
 export async function listInfrastructureChecks(query: ListInfrastructureChecksQuery) {
-  const { page, limit, centreId, itemId, detected, operability, startDate, endDate, sortBy, sortOrder } = query;
+  const { centreId, itemId, detected, operability, startDate, endDate } = query;
   const search = (query as any).search;
-  const skip = (page - 1) * limit;
+  const pageNum = Math.max(1, parseInt(String(query.page || 1), 10) || 1);
+  const take = Math.min(100, Math.max(1, parseInt(String(query.limit || 20), 10) || 20));
+  const skip = (pageNum - 1) * take;
+  const sortBy = query.sortBy || 'timestamp';
+  const sortOrder = (query.sortOrder || 'desc') as 'asc' | 'desc';
 
   const where: any = {};
   if (centreId) where.centreId = centreId;
@@ -27,7 +31,7 @@ export async function listInfrastructureChecks(query: ListInfrastructureChecksQu
     prisma.infrastructureCheck.findMany({
       where,
       skip,
-      take: limit,
+      take,
       orderBy: { [sortBy]: sortOrder },
       include: {
         centre: { select: { id: true, name: true, code: true } },
@@ -39,7 +43,7 @@ export async function listInfrastructureChecks(query: ListInfrastructureChecksQu
 
   return {
     data: checks,
-    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    pagination: { page: pageNum, limit: take, total, totalPages: Math.ceil(total / take) },
   };
 }
 

@@ -2,9 +2,13 @@ import { prisma } from '@/shared/database/prisma';
 import { ListAlertsQuery, UpdateAlertInput } from './schemas';
 
 export async function listAlerts(query: ListAlertsQuery) {
-  const { page, limit, centreId, type, severity, status, startDate, endDate, sortBy, sortOrder } = query;
+  const { centreId, type, severity, status, startDate, endDate } = query;
   const search = (query as any).search;
-  const skip = (page - 1) * limit;
+  const pageNum = Math.max(1, parseInt(String(query.page || 1), 10) || 1);
+  const take = Math.min(100, Math.max(1, parseInt(String(query.limit || 20), 10) || 20));
+  const skip = (pageNum - 1) * take;
+  const sortBy = query.sortBy || 'createdAt';
+  const sortOrder = (query.sortOrder || 'desc') as 'asc' | 'desc';
 
   const where: any = {};
   if (centreId) where.centreId = centreId;
@@ -28,7 +32,7 @@ export async function listAlerts(query: ListAlertsQuery) {
     prisma.alert.findMany({
       where,
       skip,
-      take: limit,
+      take,
       orderBy: { [sortBy]: sortOrder },
       include: { centre: { select: { id: true, name: true, code: true } } },
     }),
@@ -37,7 +41,7 @@ export async function listAlerts(query: ListAlertsQuery) {
 
   return {
     data: alerts,
-    pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    pagination: { page: pageNum, limit: take, total, totalPages: Math.ceil(total / take) },
   };
 }
 

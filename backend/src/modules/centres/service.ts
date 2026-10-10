@@ -27,8 +27,12 @@ export async function getCentreByCode(code: string) {
 }
 
 export async function listCentres(query: ListCentresQuery) {
-  const { page, limit, status, search, state, schemeId, sortBy, sortOrder } = query;
-  const skip = (page - 1) * limit;
+  const { status, search, state, schemeId } = query;
+  const pageNum = Math.max(1, parseInt(String(query.page || 1), 10) || 1);
+  const take = Math.min(100, Math.max(1, parseInt(String(query.limit || 20), 10) || 20));
+  const skip = (pageNum - 1) * take;
+  const sortBy = query.sortBy || 'createdAt';
+  const sortOrder = (query.sortOrder || 'desc') as 'asc' | 'desc';
 
   const where: any = {};
   if (status) where.status = status;
@@ -46,7 +50,7 @@ export async function listCentres(query: ListCentresQuery) {
     prisma.centre.findMany({
       where,
       skip,
-      take: limit,
+      take,
       orderBy: { [sortBy]: sortOrder },
       include: {
         _count: { select: { cameras: true, attendanceRecords: true, alerts: true } },
@@ -58,10 +62,10 @@ export async function listCentres(query: ListCentresQuery) {
   return {
     data: centres,
     pagination: {
-      page,
-      limit,
+      page: pageNum,
+      limit: take,
       total,
-      totalPages: Math.ceil(total / limit),
+      totalPages: Math.ceil(total / take),
     },
   };
 }
