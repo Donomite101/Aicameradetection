@@ -70,3 +70,7 @@ edge-device/models/*.onnx
 *.pem
 *.key
 *.crt
+
+# Nginx binary
+nginx/
+*.pid
