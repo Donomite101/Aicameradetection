@@ -1,0 +1,126 @@
+# Edge Device Configuration for SIH26245 Training Centre Monitor
+
+# Device Identification
+device:
+  id: "edge-001"
+  centre_id: "centre-001"
+  name: "Training Centre Edge Device"
+
+# Camera Configuration
+cameras:
+  - id: "cam-001"
+    name: "Main Hall"
+    rtsp_url: "rtsp://demo:demo@ipvmdemo.ivideon.com:554/cam1"
+    roi: [[100, 100], [800, 100], [800, 500], [100, 500]]  # Polygon coordinates
+    enabled: true
+    fps: 15
+    inference_interval: 2  # Process every N frames
+
+  - id: "cam-002"
+    name: "Workshop"
+    rtsp_url: "rtsp://demo:demo@ipvmdemo.ivideon.com:554/cam2"
+    roi: [[100, 100], [800, 100], [800, 500], [100, 500]]
+    enabled: true
+    fps: 10
+    inference_interval: 3
+
+# AI Model Configuration
+models:
+  person_detection:
+    path: "models/yolov8n.onnx"
+    confidence_threshold: 0.5
+    iou_threshold: 0.45
+    classes: [0]  # COCO class 0 = person
+    input_size: [640, 640]
+
+  pose_estimation:
+    path: "models/yolov8n-pose.onnx"
+    confidence_threshold: 0.5
+    input_size: [640, 640]
+
+  equipment_detection:
+    path: "models/yolov8n-equipment.onnx"
+    confidence_threshold: 0.4
+    iou_threshold: 0.45
+    classes: [0, 1, 2, 3, 4, 5]  # Custom classes for equipment
+    input_size: [640, 640]
+
+  face_detection:
+    model: "mediapipe"  # Use MediaPipe for face detection
+    min_detection_confidence: 0.5
+
+# Privacy Settings
+privacy:
+  enable_face_blur: true
+  blur_kernel_size: 51
+  store_raw_frames: false
+  store_blurred_thumbnails: true
+  thumbnail_quality: 80
+
+# Detection Settings
+detection:
+  attendance:
+    enabled: true
+    interval_seconds: 300  # 5 minutes
+    discrepancy_threshold: 2
+    min_persons_for_alert: 1
+
+  infrastructure:
+    enabled: true
+    interval_seconds: 300  # 5 minutes
+    check_operability: true
+    operability_confidence: 0.6
+
+# Communication Settings
+communication:
+  mode: "mqtt"  # mqtt, http, or both
+  mqtt:
+    broker: "mqtt://localhost:1883"
+    username: ""
+    password: ""
+    topics:
+      attendance: "sih/attendance/{centre_id}/{camera_id}"
+      infrastructure: "sih/infrastructure/{centre_id}/{camera_id}"
+      alerts: "sih/alerts/{centre_id}"
+      heartbeat: "sih/heartbeat/{device_id}"
+      commands: "sih/commands/{device_id}"
+    qos: 1
+    keepalive: 60
+
+  http:
+    endpoint: "http://localhost:3000/api/v1"
+    timeout: 30
+    retry_attempts: 3
+    retry_delay: 5
+
+# Low Bandwidth Mode
+low_bandwidth:
+  enabled: false
+  metadata_only: false
+  frame_skip: 2
+  compress_thumbnails: true
+  thumbnail_max_size: 100  # KB
+
+# Buffering (for offline operation)
+buffer:
+  enabled: true
+  max_events: 1000
+  max_size_mb: 100
+  flush_interval: 60  # seconds
+  persist_to_disk: true
+  storage_path: "data/buffer"
+
+# Logging
+logging:
+  level: "INFO"
+  format: "json"
+  file: "logs/edge-device.log"
+  rotation: "1 day"
+  retention: "7 days"
+
+# System
+system:
+  heartbeat_interval: 30  # seconds
+  health_check_interval: 60
+  auto_restart_on_error: true
+  max_consecutive_errors: 5

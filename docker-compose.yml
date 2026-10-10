@@ -1,0 +1,187 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: timescale/timescaledb:latest-pg15
+    container_name: sih-postgres
+    environment:
+      POSTGRES_USER: ${DB_USER:-sih_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-sih_password}
+      POSTGRES_DB: ${DB_NAME:-sih_monitor}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-sih_user} -d ${DB_NAME:-sih_monitor}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sih-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: sih-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sih-network
+
+  minio:
+    image: minio/minio:latest
+    container_name: sih-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - sih-network
+
+  minio-setup:
+    image: minio/mc:latest
+    container_name: sih-minio-setup
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until (/usr/bin/mc config host add minio http://minio:9000 minioadmin minioadmin) do echo '...waiting...' && sleep 1; done;
+      /usr/bin/mc mb minio/sih-thumbnails --ignore-existing;
+      /usr/bin/mc mb minio/sih-clips --ignore-existing;
+      /usr/bin/mc anonymous set public minio/sih-thumbnails;
+      /usr/bin/mc anonymous set public minio/sih-clips;
+      echo 'MinIO buckets created successfully.'
+      "
+    networks:
+      - sih-network
+
+  mqtt:
+    image: eclipse-mosquitto:2
+    container_name: sih-mqtt
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf
+      - mqtt_data:/mosquitto/data
+      - mqtt_logs:/mosquitto/log
+    healthcheck:
+      test: ["CMD", "mosquitto_sub", "-t", "$SYS/broker/version", "-C", "1", "-W", "5"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - sih-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.dev
+    container_name: sih-backend
+    environment:
+      - NODE_ENV=development
+      - DATABASE_URL=postgresql://${DB_USER:-sih_user}:${DB_PASSWORD:-sih_password}@postgres:5432/${DB_NAME:-sih_monitor}?schema=public
+      - REDIS_URL=redis://redis:6379
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - MINIO_BUCKET_THUMBNAILS=sih-thumbnails
+      - MINIO_BUCKET_CLIPS=sih-clips
+      - JWT_SECRET=${JWT_SECRET:-dev-secret-change-in-production}
+      - PORT=3000
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - sih-network
+    command: npm run dev
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    container_name: sih-frontend
+    environment:
+      - VITE_API_URL=http://localhost:3000
+      - VITE_WS_URL=ws://localhost:3000
+    ports:
+      - "5174:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    networks:
+      - sih-network
+    command: npm run dev -- --port 5173 --host
+
+  edge-device:
+    build:
+      context: ./edge-device
+      dockerfile: Dockerfile
+    container_name: sih-edge-device
+    environment:
+      - MQTT_BROKER=mqtt://mqtt:1883
+      - HTTP_ENDPOINT=http://backend:3000/api/v1
+      - DEVICE_ID=edge-001
+      - CENTRE_ID=centre-001
+    volumes:
+      - ./edge-device/config.yaml:/app/config.yaml
+      - ./edge-device/models:/app/models
+      - edge_device_data:/app/data
+      - edge_device_logs:/app/logs
+    depends_on:
+      mqtt:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    networks:
+      - sih-network
+    command: python src/main.py
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+networks:
+  sih-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  mqtt_data:
+  mqtt_logs:
+  edge_device_data:
+  edge_device_logs:

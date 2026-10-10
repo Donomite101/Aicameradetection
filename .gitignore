@@ -1,0 +1,72 @@
+# Dependencies
+node_modules/
+**/node_modules/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+.next/
+out/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Database
+*.sqlite
+*.db
+
+# Docker
+.docker/
+
+# Coverage
+coverage/
+.nyc_output/
+
+# Testing
+*.lcov
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Prisma
+prisma/migrations/.migration_lock.toml
+
+# MinIO
+minio_data/
+
+# Edge device
+edge-device/data/
+edge-device/logs/
+edge-device/models/*.onnx
+
+# OS specific
+*.pem
+*.key
+*.crt

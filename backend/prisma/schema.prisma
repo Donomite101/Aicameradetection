@@ -1,0 +1,184 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  passwordHash  String
+  fullName      String
+  role          String    @default("VIEWER") // ADMIN, MONITORING_OFFICER, CENTRE_MANAGER, VIEWER
+  centreId      String?
+  centre        Centre?   @relation(fields: [centreId], references: [id])
+  isActive      Boolean   @default(true)
+  lastLoginAt   DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([email])
+  @@index([centreId])
+}
+
+model Centre {
+  id                  String          @id @default(cuid())
+  code                String          @unique
+  name                String
+  address             String
+  city                String
+  state               String
+  pincode             String
+  latitude            Float
+  longitude           Float
+  sanctionedCapacity  Int
+  status              String          @default("PENDING_VERIFICATION") // ACTIVE, INACTIVE, SUSPENDED, PENDING_VERIFICATION
+  contactPerson       String?
+  contactPhone        String?
+  contactEmail        String?
+  schemeId            String?
+  schemeName          String?
+  cameras             Camera[]
+  inventory           InventoryItem[]
+  attendanceRecords   AttendanceRecord[]
+  infrastructureChecks InfrastructureCheck[]
+  alerts              Alert[]
+  users               User[]
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+
+  @@index([code])
+  @@index([status])
+  @@index([latitude, longitude])
+}
+
+model Camera {
+  id          String   @id @default(cuid())
+  centreId    String
+  centre      Centre   @relation(fields: [centreId], references: [id], onDelete: Cascade)
+  name        String
+  rtspUrl     String
+  roi         String?             // JSON string of Region of Interest polygon coordinates
+  isActive    Boolean  @default(true)
+  lastSeenAt  DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([centreId])
+  @@index([isActive])
+}
+
+model InventoryItem {
+  id          String            @id @default(cuid())
+  centreId    String
+  centre      Centre            @relation(fields: [centreId], references: [id], onDelete: Cascade)
+  name        String
+  category    String            // MACHINERY, FURNITURE, SAFETY, TOOLS, COMPUTERS, OTHER
+  quantity    Int
+  unit        String            @default("PCS")
+  specs       String?           // JSON string of specifications
+  location    String?           // Room/area within centre
+  isActive    Boolean           @default(true)
+  checks      InfrastructureCheck[]
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  @@index([centreId])
+  @@index([category])
+}
+
+model AttendanceRecord {
+  id            String           @id @default(cuid())
+  centreId      String
+  centre        Centre           @relation(fields: [centreId], references: [id], onDelete: Cascade)
+  date          DateTime
+  session       String           // MORNING, AFTERNOON, EVENING, FULL_DAY
+  recordedCount Int
+  detectedCount Int?
+  discrepancy   Int?
+  status        String           @default("PENDING") // PENDING, VERIFIED, DISCREPANT, UNDER_REVIEW
+  confidence    Float?           // Average detection confidence
+  metadata      String?          // JSON string of additional detection data
+  submittedBy   String?          // User ID who submitted
+  verifiedBy    String?          // User ID who verified
+  verifiedAt    DateTime?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@unique([centreId, date, session])
+  @@index([centreId, date])
+  @@index([status])
+}
+
+model InfrastructureCheck {
+  id              String              @id @default(cuid())
+  centreId        String
+  centre          Centre              @relation(fields: [centreId], references: [id], onDelete: Cascade)
+  itemId          String
+  item            InventoryItem       @relation(fields: [itemId], references: [id])
+  timestamp       DateTime            @default(now())
+  detected        Boolean
+  operability     String              @default("UNKNOWN") // FUNCTIONAL, NON_FUNCTIONAL, UNKNOWN, MAINTENANCE
+  confidence      Float
+  personNearby    Boolean             @default(false)
+  thumbnailUrl    String?
+  metadata        String?             // JSON string of bounding boxes, additional info
+  createdAt       DateTime            @default(now())
+
+  @@index([centreId, timestamp])
+  @@index([itemId, timestamp])
+  @@index([detected])
+}
+
+model Alert {
+  id          String        @id @default(cuid())
+  centreId    String
+  centre      Centre        @relation(fields: [centreId], references: [id], onDelete: Cascade)
+  type        String        // ATTENDANCE_DISCREPANCY, EQUIPMENT_MISSING, EQUIPMENT_NON_FUNCTIONAL, CAMERA_OFFLINE, LOW_CONFIDENCE
+  severity    String        @default("MEDIUM") // LOW, MEDIUM, HIGH, CRITICAL
+  title       String
+  message     String
+  metadata    String        // JSON string of detection details, counts, etc.
+  status      String        @default("OPEN") // OPEN, ACKNOWLEDGED, IN_PROGRESS, RESOLVED, FALSE_POSITIVE, DISMISSED
+  acknowledgedBy String?
+  acknowledgedAt DateTime?
+  resolvedBy  String?
+  resolvedAt  DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([centreId, status])
+  @@index([type, severity])
+  @@index([createdAt])
+}
+
+model SystemConfig {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String   // JSON string
+  category  String
+  description String?
+  updatedAt DateTime @updatedAt
+
+  @@index([category])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  entity    String
+  entityId  String
+  oldValue  String?  // JSON string
+  newValue  String?  // JSON string
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
