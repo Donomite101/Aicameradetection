@@ -74,3 +74,6 @@ edge-device/models/*.onnx
 # Nginx binary
 nginx/
 *.pid
+
+# ngrok binary
+ngrok.exe
