@@ -17,6 +17,7 @@ import {
   TableCell,
 } from '@/components/ui/table';
 import { infrastructureApi, dashboardApi } from '@/services/api';
+import { useAuthStore } from '@/store/auth';
 import type { InfrastructureCheck, PaginatedResponse } from '@/types';
 import { cn, formatPercent } from '@/lib/utils';
 import {
@@ -45,6 +46,9 @@ const categoryIcons: Record<string, React.ComponentType<{ className?: string }>>
 };
 
 export function InfrastructurePage() {
+  const { user } = useAuthStore();
+  const isAdmin = user?.role === 'ADMIN';
+
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [detectedFilter, setDetectedFilter] = useState<string>('');
@@ -88,8 +92,19 @@ export function InfrastructurePage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold">Infrastructure Compliance</h1>
-          <p className="text-muted-foreground">Monitor equipment and facility compliance across centres</p>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold">Infrastructure Compliance</h1>
+            {!isAdmin && (
+              <Badge variant="secondary" className="font-mono text-xs">
+                {user?.centre?.code || 'Site Scope'}
+              </Badge>
+            )}
+          </div>
+          <p className="text-muted-foreground">
+            {isAdmin
+              ? 'Monitor equipment and facility compliance across centres'
+              : `AI inspection of workshop equipment and tools for ${user?.centre?.name || 'Assigned Training Centre'}`}
+          </p>
         </div>
         <Button variant="outline"><RefreshCw className="h-4 w-4 mr-2" />Refresh</Button>
       </div>

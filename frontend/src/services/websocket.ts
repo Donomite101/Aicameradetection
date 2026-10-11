@@ -2,7 +2,9 @@ import { io, Socket } from 'socket.io-client';
 import { getAuthTokens } from '@/store/auth';
 import { useAuthStore } from '@/store/auth';
 
-const WS_URL = import.meta.env.VITE_WS_URL || 'https://sterility-upheld-attic.ngrok-free.dev';
+// Same idea as the API: on this computer use the page's own address (Vite forwards /ws to the backend)
+const onThisComputer = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
+const WS_URL: string | undefined = onThisComputer ? undefined : import.meta.env.VITE_WS_URL || undefined;
 
 class WebSocketService {
   private socket: Socket | null = null;
@@ -13,10 +15,10 @@ class WebSocketService {
   connect(): Socket {
     if (this.socket?.connected) return this.socket;
 
-    const tokens = getAuthTokens();
     this.socket = io(WS_URL, {
       path: '/ws',
-      auth: { token: tokens?.accessToken },
+      // A function, so every (re)connect sends the CURRENT token, not the one from when the page was opened
+      auth: (cb) => cb({ token: getAuthTokens()?.accessToken }),
       transports: ['websocket', 'polling'],
       extraHeaders: {
         'ngrok-skip-browser-warning': 'true',

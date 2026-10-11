@@ -1,10 +1,14 @@
 'use client';
 
 import * as React from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { formatDistanceToNow } from 'date-fns';
 import { Bell, Sun, Moon, Search, User, ChevronDown, LogOut, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore } from '@/store/auth';
+import { alertsApi } from '@/services/api';
+import { ws } from '@/services/websocket';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -18,6 +22,10 @@ import {
 const pageTitles: Record<string, string> = {
   '/': 'Dashboard',
   '/centres': 'Training Centres',
+  '/schemes': 'Government Schemes',
+  '/officers': 'Officers',
+  '/trainees': 'Trainees',
+  '/live': 'Live Camera',
   '/attendance': 'Attendance Records',
   '/infrastructure': 'Infrastructure Compliance',
   '/alerts': 'Alerts & Notifications',
@@ -29,6 +37,23 @@ const pageTitles: Record<string, string> = {
 export function Header() {
   const location = useLocation();
   const { user } = useAuthStore();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  const { data: alertsData } = useQuery({
+    queryKey: ['header-alerts', user?.centreId],
+    queryFn: () => alertsApi.list({ status: 'OPEN', limit: 5 }),
+    refetchInterval: 60_000,
+    enabled: !!user,
+  });
+  const openAlerts: any[] = (alertsData as any)?.data || [];
+  const openAlertTotal: number = (alertsData as any)?.pagination?.total ?? openAlerts.length;
+
+  React.useEffect(() => {
+    const unsub = ws.on('alert:new', () => queryClient.invalidateQueries({ queryKey: ['header-alerts'] }));
+    return () => unsub();
+  }, [queryClient]);
+
   const [darkMode, setDarkMode] = React.useState(() => {
     if (typeof window !== 'undefined') {
       return document.documentElement.classList.contains('dark');
@@ -60,17 +85,18 @@ export function Header() {
   };
 
   return (
-    <header className="sticky top-0 z-30 h-16 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 border-b">
-      <div className="flex h-full items-center justify-between px-4 lg:px-6">
-        <div className="flex items-center gap-4">
-          <h1 className="text-lg font-semibold truncate max-w-[300px]">{getPageTitle()}</h1>
+    <header className="sticky top-0 z-30 h-[72px] border-b bg-background/80 backdrop-blur-md">
+      <div className="flex h-full items-center justify-between px-4 lg:px-8">
+        <div className="flex items-center gap-4 pl-12 lg:pl-0">
+          <h1 className="max-w-[320px] truncate text-xl font-bold tracking-tight">{getPageTitle()}</h1>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           {/* Theme toggle */}
           <Button
             variant="ghost"
             size="icon"
+            className="rounded-xl text-muted-foreground hover:text-foreground"
             onClick={() => setDarkMode(!darkMode)}
             aria-label={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
           >
@@ -80,34 +106,32 @@ export function Header() {
           {/* Notifications */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="relative">
+              <Button variant="ghost" size="icon" className="relative rounded-xl text-muted-foreground hover:text-foreground">
                 <Bell className="h-5 w-5" />
-                <span className="absolute -top-1 -right-1 h-4 w-4 rounded-full bg-destructive text-[10px] font-medium text-white flex items-center justify-center">
-                  3
-                </span>
+                {openAlertTotal > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold text-white ring-2 ring-background">
+                    {openAlertTotal > 99 ? '99+' : openAlertTotal}
+                  </span>
+                )}
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-80">
               <DropdownMenuLabel>Notifications</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              <DropdownMenuItem className="text-sm py-2">
-                <p className="font-medium">Attendance discrepancy detected</p>
-                <p className="text-xs text-muted-foreground">TC-DEL-001 - Morning session</p>
-                <p className="text-xs text-muted-foreground">5 min ago</p>
-              </DropdownMenuItem>
-              <DropdownMenuItem className="text-sm py-2">
-                <p className="font-medium">Equipment missing: Welding Machine</p>
-                <p className="text-xs text-muted-foreground">TC-MUM-002 - Workshop Bay</p>
-                <p className="text-xs text-muted-foreground">1 hour ago</p>
-              </DropdownMenuItem>
-              <DropdownMenuItem className="text-sm py-2">
-                <p className="font-medium">Camera offline: TC-BLR-003</p>
-                <p className="text-xs text-muted-foreground">Main Hall Camera 1</p>
-                <p className="text-xs text-muted-foreground">2 hours ago</p>
-              </DropdownMenuItem>
+              {openAlerts.length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">No open alerts</p>
+              ) : (
+                openAlerts.map((alert) => (
+                  <DropdownMenuItem key={alert.id} className="text-sm py-2 flex-col items-start" onClick={() => navigate('/alerts')}>
+                    <p className="font-medium">{alert.title}</p>
+                    <p className="text-xs text-muted-foreground">{alert.centre?.name || alert.message}</p>
+                    <p className="text-xs text-muted-foreground">{formatDistanceToNow(new Date(alert.createdAt), { addSuffix: true })}</p>
+                  </DropdownMenuItem>
+                ))
+              )}
               <DropdownMenuSeparator />
-              <DropdownMenuItem className="text-sm py-2 text-center text-primary">
-                View all notifications
+              <DropdownMenuItem className="text-sm py-2 text-center text-primary justify-center" onClick={() => navigate('/alerts')}>
+                View all alerts
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -115,8 +139,8 @@ export function Header() {
           {/* User menu */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" className="relative h-9 w-9 rounded-full">
-                <div className="h-9 w-9 rounded-full bg-primary flex items-center justify-center text-primary-foreground font-medium">
+              <Button variant="ghost" className="relative ml-1 h-10 w-10 rounded-xl p-0">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-sm font-semibold text-white">
                   {user?.fullName?.charAt(0).toUpperCase() || 'U'}
                 </div>
               </Button>

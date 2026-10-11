@@ -122,6 +122,9 @@ export function SchemesPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['schemes'] });
     },
+    onError: (err: any) => {
+      alert(err?.response?.data?.message || 'Could not delete this scheme');
+    },
   });
 
   const onSubmit = (formData: SchemeFormData) => {
@@ -162,7 +165,9 @@ export function SchemesPage() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{schemes.length}</div>
-            <p className="text-xs text-muted-foreground">Active national skill missions</p>
+            <p className="text-xs text-muted-foreground">
+              Running at {schemes.reduce((acc, s) => acc + (s.centreCount ?? 0), 0)} centres
+            </p>
           </CardContent>
         </Card>
 
@@ -228,6 +233,8 @@ export function SchemesPage() {
                     <TableHead>Nodal Ministry</TableHead>
                     <TableHead>Funding Model</TableHead>
                     <TableHead>Target Beneficiaries</TableHead>
+                    <TableHead>Centres</TableHead>
+                    <TableHead>Trainees</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -262,9 +269,11 @@ export function SchemesPage() {
                           ? scheme.targetBeneficiaries.toLocaleString()
                           : '—'}
                       </TableCell>
+                      <TableCell className="font-mono">{scheme.centreCount ?? 0}</TableCell>
+                      <TableCell className="font-mono">{(scheme.totalTrainees ?? 0).toLocaleString()}</TableCell>
                       <TableCell>
                         {scheme.isActive ? (
-                          <Badge variant="default" className="bg-emerald-600 hover:bg-emerald-600">
+                          <Badge variant="success">
                             Active
                           </Badge>
                         ) : (

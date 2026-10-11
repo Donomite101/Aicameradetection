@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
 import { useAuthStore } from '@/store/auth';
+import { authApi } from '@/services/api';
 import { cn } from '@/lib/utils';
 import {
   Tabs,
@@ -78,24 +79,31 @@ export function SettingsPage() {
 
   const profileMutation = useMutation({
     mutationFn: async (data: ProfileFormData) => {
-      // In a real app, this would call an API
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      return { ...user, fullName: data.fullName, email: data.email };
+      // A new password needs the current one: check that BEFORE anything is saved
+      if (data.newPassword && !data.currentPassword) {
+        throw new Error('Enter your current password to set a new one');
+      }
+      const res: any = await authApi.updateProfile({ fullName: data.fullName });
+      if (data.newPassword) {
+        await authApi.changePassword(data.currentPassword as string, data.newPassword);
+      }
+      return { fullName: res.user.fullName as string, passwordChanged: !!data.newPassword };
     },
-    onSuccess: (updatedUser) => {
-      updateUser(updatedUser);
-      toast.success('Profile updated successfully');
+    onSuccess: ({ fullName, passwordChanged }) => {
+      updateUser({ fullName });
+      profileForm.reset({ ...profileForm.getValues(), currentPassword: '', newPassword: '', confirmPassword: '' });
+      toast.success(passwordChanged ? 'Profile and password updated' : 'Profile updated');
     },
-    onError: () => toast.error('Failed to update profile'),
+    onError: (err: any) => toast.error(err?.response?.data?.error || err?.message || 'Could not update your profile'),
   });
 
   const settingsMutation = useMutation({
     mutationFn: async (data: SettingsFormData) => {
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // These are display preferences kept in this browser only (nothing is sent to the server)
       localStorage.setItem('app-settings', JSON.stringify(data));
       return data;
     },
-    onSuccess: () => toast.success('Settings saved successfully'),
+    onSuccess: () => toast.success('Preferences saved on this browser'),
     onError: () => toast.error('Failed to save settings'),
   });
 
@@ -146,8 +154,10 @@ export function SettingsPage() {
                     {...profileForm.register('fullName')}
                   />
                   <Input
-                    label="Email"
+                    label="Email (sign-in)"
                     type="email"
+                    readOnly
+                    hint="Ask an administrator to change your sign-in email."
                     error={profileForm.formState.errors.email?.message}
                     {...profileForm.register('email')}
                   />

@@ -26,7 +26,6 @@ const statusColors: Record<string, string> = {
   ACTIVE: '#22c55e',
   INACTIVE: '#ef4444',
   SUSPENDED: '#f59e0b',
-  PENDING_VERIFICATION: '#6b7280',
 };
 
 function MapComponent({
@@ -184,7 +183,6 @@ export function MapPage() {
               <SelectItem value="ACTIVE">Active</SelectItem>
               <SelectItem value="INACTIVE">Inactive</SelectItem>
               <SelectItem value="SUSPENDED">Suspended</SelectItem>
-              <SelectItem value="PENDING_VERIFICATION">Pending Verification</SelectItem>
             </SelectContent>
           </Select>
           <Button variant="outline" onClick={() => refetch()}><RefreshCw className="h-4 w-4 mr-2" />Refresh</Button>

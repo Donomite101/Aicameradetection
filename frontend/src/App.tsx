@@ -3,6 +3,7 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/main-layout';
 import { DashboardPage } from '@/pages/Dashboard';
 import { CentresPage } from '@/pages/Centres';
+import { CentreDetailPage } from '@/pages/CentreDetail';
 import { AttendancePage } from '@/pages/Attendance';
 import { InfrastructurePage } from '@/pages/Infrastructure';
 import { AlertsPage } from '@/pages/Alerts';
@@ -13,6 +14,7 @@ import { SchemesPage } from '@/pages/Schemes';
 import { OfficersPage } from '@/pages/Officers';
 import { TraineesPage } from '@/pages/Trainees';
 import { LoginPage } from '@/pages/Login';
+import { LiveCameraPage } from '@/pages/LiveCamera';
 import { useAuthStore } from '@/store/auth';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -20,6 +22,16 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
+  }
+  
+  return <>{children}</>;
+}
+
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  const user = useAuthStore((state) => state.user);
+  
+  if (user?.role !== 'ADMIN') {
+    return <Navigate to="/" replace />;
   }
   
   return <>{children}</>;
@@ -86,10 +98,12 @@ export function App() {
       <Route element={<ProtectedRoute><MainLayout /></ProtectedRoute>}>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/centres" element={<CentresPage />} />
-        <Route path="/schemes" element={<SchemesPage />} />
-        <Route path="/officers" element={<OfficersPage />} />
+        <Route path="/centres/:id" element={<CentreDetailPage />} />
+        <Route path="/schemes" element={<AdminRoute><SchemesPage /></AdminRoute>} />
+        <Route path="/officers" element={<AdminRoute><OfficersPage /></AdminRoute>} />
         <Route path="/trainees" element={<TraineesPage />} />
         <Route path="/attendance" element={<AttendancePage />} />
+        <Route path="/live" element={<LiveCameraPage />} />
         <Route path="/infrastructure" element={<InfrastructurePage />} />
         <Route path="/alerts" element={<AlertsPage />} />
         <Route path="/map" element={<MapPage />} />

@@ -25,20 +25,75 @@ export interface Centre {
   contactPerson?: string;
   contactPhone?: string;
   contactEmail?: string;
+  area?: string;
+  totalTrainees?: number;
   schemeId?: string;
   schemeName?: string;
+  scheme?: { id: string; code: string; name: string } | null;
+  classSlots?: ClassSlot[];
   cameras?: Camera[];
   inventory?: InventoryItem[];
   _count?: {
     cameras: number;
     attendanceRecords: number;
     alerts: number;
+    inventory?: number;
+    trainees?: number;
   };
   createdAt: string;
   updatedAt: string;
 }
 
-export type CentreStatus = 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | 'PENDING_VERIFICATION';
+export interface ClassSlot {
+  id: string;
+  centreId: string;
+  name: string;
+  startTime: string; // HH:mm
+  endTime: string; // HH:mm
+  daysOfWeek: string; // CSV of 0 (Sun) - 6 (Sat)
+  expectedTrainees?: number | null;
+  isActive: boolean;
+}
+
+export interface CentreSchedule {
+  slots: ClassSlot[];
+  activeSlot: ClassSlot | null;
+  nextSlot: (ClassSlot & { startsAt: string }) | null;
+  serverTime: string;
+}
+
+export interface ToolSummaryEntry {
+  itemId: string;
+  name: string;
+  detectClass: string;
+  expected: number;
+  maxDetected: number;
+  lastDetected: number;
+}
+
+export interface TodaySession {
+  centreId: string;
+  centreName: string;
+  centreCode: string;
+  classSlotId: string;
+  name: string;
+  startTime: string;
+  endTime: string;
+  state: 'UPCOMING' | 'LIVE' | 'COMPLETED' | 'MISSED';
+  expected: number;
+  detected: number | null;
+  peak: number | null;
+  attendancePercent: number | null;
+  toolsOk: number;
+  toolsTotal: number;
+  status: string | null;
+  recordId: string | null;
+  liveCount?: number | null;
+  isFinal?: boolean;
+  lastDetectionAt?: string | null;
+}
+
+export type CentreStatus = 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
 
 export interface Camera {
   id: string;
@@ -73,9 +128,28 @@ export interface AttendanceRecord {
   centreId: string;
   centre?: Centre;
   date: string;
-  session: AttendanceSession;
+  session: AttendanceSession | string;
+  classSlotId?: string | null;
+  classSlot?: Pick<ClassSlot, 'id' | 'name' | 'startTime' | 'endTime'> | null;
   recordedCount: number;
+  expectedCount: number;
   detectedCount?: number;
+  peakCount?: number | null;
+  finalCount?: number | null;
+  presentCount?: number | null;
+  isFinal?: boolean;
+  avgCount?: number | null;
+  minCount?: number | null;
+  sampleCount: number;
+  firstSeenAt?: string | null;
+  lastSeenAt?: string | null;
+  finalizedAt?: string | null;
+  tools?: ToolSummaryEntry[];
+  toolsOk?: number;
+  toolsTotal?: number;
+  attendancePercent?: number | null;
+  peakAttendancePercent?: number | null;
+  snapshots?: { id: string; timestamp: string; peopleCount: number; confidence: number; items: string }[];
   discrepancy?: number;
   status: AttendanceStatus;
   confidence?: number;
@@ -155,6 +229,7 @@ export interface DashboardSummary {
     totalCameras: number;
     onlineCameras: number;
     cameraUptime: number;
+    totalTrainees?: number;
   };
   attendance: {
     totalRecords: number;
@@ -166,6 +241,7 @@ export interface DashboardSummary {
     critical: number;
   };
   recentAttendance: AttendanceRecord[];
+  todaySessions?: TodaySession[];
   recentAlerts: Alert[];
 }
 
@@ -218,6 +294,8 @@ export interface Scheme {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+  centreCount?: number;
+  totalTrainees?: number;
 }
 
 export interface Trainee {

@@ -17,6 +17,7 @@ import {
   TableCell,
 } from '@/components/ui/table';
 import { alertsApi } from '@/services/api';
+import { useAuthStore } from '@/store/auth';
 import type { Alert, PaginatedResponse } from '@/types';
 import { cn } from '@/lib/utils';
 import {
@@ -61,6 +62,8 @@ const typeIcons: Record<string, React.ComponentType<{ className?: string }>> = {
 
 
 export function AlertsPage() {
+  const { user } = useAuthStore();
+  const isAdmin = user?.role === 'ADMIN';
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -120,8 +123,19 @@ export function AlertsPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold">Alerts & Notifications</h1>
-          <p className="text-muted-foreground">Monitor and manage system alerts across all centres</p>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold">Alerts & Notifications</h1>
+            {!isAdmin && (
+              <Badge variant="secondary" className="font-mono text-xs">
+                {user?.centre?.code || 'Site Scope'}
+              </Badge>
+            )}
+          </div>
+          <p className="text-muted-foreground">
+            {isAdmin
+              ? 'Monitor and manage system alerts across all centres'
+              : `Active AI detection alerts for ${user?.centre?.name || 'Assigned Training Centre'}`}
+          </p>
         </div>
       </div>
 

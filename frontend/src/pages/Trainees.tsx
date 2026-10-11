@@ -76,8 +76,16 @@ export function TraineesPage() {
 
   // Attendance state
   const [attendanceDate, setAttendanceDate] = useState(() => new Date().toISOString().split('T')[0]);
-  const [attendanceSession, setAttendanceSession] = useState<'FULL_DAY' | 'MORNING' | 'AFTERNOON'>('FULL_DAY');
+  const [attendanceSession, setAttendanceSession] = useState<string>('FULL_DAY');
   const [attendanceStatuses, setAttendanceStatuses] = useState<Record<string, 'PRESENT' | 'ABSENT' | 'LEAVE'>>({});
+
+  // The centre's class slots are the sessions trainees can be marked for
+  const { data: scheduleData } = useQuery<any>({
+    queryKey: ['centre-schedule', user?.centreId],
+    queryFn: () => centresApi.schedule(user?.centreId as string),
+    enabled: !!user?.centreId,
+  });
+  const classSlots: any[] = scheduleData?.slots || [];
 
   // Queries
   const { data: traineesData, isLoading } = useQuery({
@@ -437,16 +445,7 @@ export function TraineesPage() {
                         </TableCell>
                       )}
                       <TableCell>
-                        <Badge
-                          variant="default"
-                          className={
-                            t.status === 'ACTIVE'
-                              ? 'bg-emerald-600 hover:bg-emerald-600'
-                              : t.status === 'COMPLETED'
-                              ? 'bg-blue-600 hover:bg-blue-600'
-                              : 'bg-zinc-600 hover:bg-zinc-600'
-                          }
-                        >
+                        <Badge variant={t.status === 'ACTIVE' ? 'success' : t.status === 'COMPLETED' ? 'info' : 'secondary'}>
                           {t.status}
                         </Badge>
                       </TableCell>
@@ -657,8 +656,9 @@ export function TraineesPage() {
                     className="h-8 rounded-md border border-input bg-transparent px-2 text-xs shadow-sm"
                   >
                     <option value="FULL_DAY">Full Day</option>
-                    <option value="MORNING">Morning Session</option>
-                    <option value="AFTERNOON">Afternoon Session</option>
+                    {classSlots.map((slot: any) => (
+                      <option key={slot.id} value={slot.name}>{slot.name} ({slot.startTime}-{slot.endTime})</option>
+                    ))}
                   </select>
                 </div>
               </div>

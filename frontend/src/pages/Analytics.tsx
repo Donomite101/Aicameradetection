@@ -64,7 +64,7 @@ export function AnalyticsPage() {
   const safeTrends: any[] = (attendanceTrends as any)?.trends || (Array.isArray(attendanceTrends) ? attendanceTrends : []);
   const attendanceData = safeTrends.map((d: any) => ({
     date: format(new Date(d.date), 'MMM dd'),
-    recorded: d.recorded,
+    expected: d.expected ?? d.recorded,
     detected: d.detected,
     discrepancy: d.discrepancy,
   }));
@@ -215,7 +215,7 @@ export function AnalyticsPage() {
                     formatter={(value: number) => [value, 'persons']}
                     labelFormatter={(date) => `Date: ${date}`}
                   />
-                  <Area type="monotone" dataKey="recorded" stroke="#3b82f6" fillOpacity={1} fill="url(#colorRecorded)" name="Recorded" />
+                  <Area type="monotone" dataKey="expected" stroke="#3b82f6" fillOpacity={1} fill="url(#colorRecorded)" name="Expected" />
                   <Area type="monotone" dataKey="detected" stroke="#22c55e" fillOpacity={1} fill="url(#colorDetected)" name="Detected" />
                 </AreaChart>
               </ResponsiveContainer>

@@ -6,6 +6,13 @@ export default {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
+      },
+      boxShadow: {
+        card: '0 1px 2px rgba(16, 24, 40, 0.04)',
+        float: '0 8px 30px rgba(16, 24, 40, 0.08)',
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",

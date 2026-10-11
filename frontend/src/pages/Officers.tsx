@@ -259,7 +259,7 @@ export function OfficersPage() {
                       </TableCell>
                       <TableCell>
                         {officer.isActive !== false ? (
-                          <Badge variant="default" className="bg-emerald-600 hover:bg-emerald-600">
+                          <Badge variant="success">
                             Active
                           </Badge>
                         ) : (

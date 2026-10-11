@@ -1,7 +1,10 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { getAuthTokens, setAuthTokens, clearAuthTokens } from '@/store/auth';
 
-const API_URL = import.meta.env.VITE_API_URL || 'https://sterility-upheld-attic.ngrok-free.dev';
+// Open the page on this computer and requests go to the same address (Vite / nginx forward /api to the backend).
+// Sending them out to the public tunnel and back would add an internet round trip to every single request.
+const onThisComputer = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
+const API_URL = onThisComputer ? '' : import.meta.env.VITE_API_URL || '';
 const API_PREFIX = '/api/v1';
 
 export const api: any = axios.create({
@@ -114,6 +117,7 @@ export const authApi = {
   refresh: (refreshToken: string) =>
     api.post('/auth/refresh', { refreshToken }),
   me: () => api.get('/auth/me'),
+  updateProfile: (data: { fullName: string }) => api.patch('/auth/me', data),
   changePassword: (currentPassword: string, newPassword: string) =>
     api.post('/auth/change-password', { currentPassword, newPassword }),
   forgotPassword: (email: string) =>
@@ -130,6 +134,8 @@ export const centresApi = {
   update: (id: string, data: Record<string, unknown>) => api.patch(`/centres/${id}`, data),
   delete: (id: string) => api.delete(`/centres/${id}`),
   stats: (id: string) => api.get(`/centres/${id}/stats`),
+  schedule: (id: string) => api.get(`/centres/${id}/schedule`),
+  analytics: (id: string, params?: Record<string, unknown>) => api.get(`/centres/${id}/analytics`, { params }),
   cameras: {
     list: (centreId: string) => api.get(`/centres/${centreId}/cameras`),
     add: (centreId: string, data: Record<string, unknown>) => api.post(`/centres/${centreId}/cameras`, data),
@@ -144,6 +150,10 @@ export const centresApi = {
       api.patch(`/centres/${centreId}/inventory/${itemId}`, data),
     delete: (centreId: string, itemId: string) => api.delete(`/centres/${centreId}/inventory/${itemId}`),
   },
+};
+
+export const detectionApi = {
+  classes: () => api.get('/detection/classes'),
 };
 
 export const attendanceApi = {
