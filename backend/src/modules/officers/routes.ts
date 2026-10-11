@@ -1,6 +1,7 @@
 import { FastifyInstance } from 'fastify';
 import { createOfficerSchema, updateOfficerSchema, listOfficersSchema } from './schemas';
 import { createOfficer, listOfficers, getOfficerById, updateOfficer, deleteOfficer } from './service';
+import { invalidateUserCache } from '@/modules/auth/service';
 
 export async function officerRoutes(app: FastifyInstance) {
   // List officers (Admin only)
@@ -13,7 +14,7 @@ export async function officerRoutes(app: FastifyInstance) {
     const { id } = request.params as { id: string };
     const user = request.user as any;
     // Admins can view any officer; officers can view themselves
-    if (user.role !== 'ADMIN' && user.id !== id) {
+    if (user.role !== 'ADMIN' && user.userId !== id) {
       return reply.status(403).send({ error: 'Access denied' });
     }
     const officer = await getOfficerById(id);
@@ -27,14 +28,26 @@ export async function officerRoutes(app: FastifyInstance) {
   });
 
   // Update officer (Admin only)
-  app.patch('/:id', { schema: updateOfficerSchema, preHandler: [app.authenticate, app.requireRole('ADMIN')] }, async (request) => {
+  app.patch('/:id', { schema: updateOfficerSchema, preHandler: [app.authenticate, app.requireRole('ADMIN')] }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    return updateOfficer(id, request.body as any);
+    const me = request.user as any;
+    const body = request.body as any;
+    if (id === me.userId && (body.isActive === false || (body.role && body.role !== me.role))) {
+      return reply.status(400).send({ error: 'You cannot deactivate or change the role of your own account' });
+    }
+    const updated = await updateOfficer(id, body);
+    invalidateUserCache(id);
+    return updated;
   });
 
   // Delete officer (Admin only)
-  app.delete('/:id', { preHandler: [app.authenticate, app.requireRole('ADMIN')] }, async (request) => {
+  app.delete('/:id', { preHandler: [app.authenticate, app.requireRole('ADMIN')] }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    return deleteOfficer(id);
+    if (id === (request.user as any).userId) {
+      return reply.status(400).send({ error: 'You cannot delete your own account' });
+    }
+    const result = await deleteOfficer(id);
+    invalidateUserCache(id);
+    return result;
   });
 }

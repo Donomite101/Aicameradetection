@@ -38,9 +38,12 @@ export const envSchema = z.object({
   MINIO_USE_SSL: z.coerce.boolean().default(false),
 
   JWT_SECRET: z.string().min(32).default('dev-secret-change-in-production-min-32-chars'),
+  // Shared secret the AI service sends as X-Device-Key (empty = device access switched off)
+  DEVICE_API_KEY: z.string().default(''),
   JWT_EXPIRES_IN: z.string().default('7d'),
   JWT_REFRESH_EXPIRES_IN: z.string().default('30d'),
 
+  AI_SERVICE_URL: z.string().default('http://127.0.0.1:8000'),
   YOLO_MODEL_PATH: z.string().default('./models/yolov8n.onnx'),
   PERSON_CONF_THRESHOLD: z.coerce.number().default(0.5),
   PERSON_IOU_THRESHOLD: z.coerce.number().default(0.45),

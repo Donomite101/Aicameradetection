@@ -1,4 +1,5 @@
 import { FastifyInstance } from 'fastify';
+import { prisma } from '@/shared/database/prisma';
 import {
   createTraineeSchema,
   updateTraineeSchema,
@@ -91,12 +92,34 @@ export async function traineeRoutes(app: FastifyInstance) {
     const user = request.user as any;
     const body = request.body as any;
 
-    const centreId = user.centreId || request.headers['x-centre-id'] as string;
-    if (!centreId && user.role !== 'ADMIN') {
-      return reply.status(400).send({ error: 'No centre associated with user' });
+    // Every trainee is filed under their own centre. Officers can only mark their own centre's trainees;
+    // an admin may mark trainees of several centres in one go. (The old x-centre-id header let anyone pick a centre.)
+    const traineeIds: string[] = [...new Set<string>(body.records.map((r: any) => r.traineeId))];
+    const trainees = await prisma.trainee.findMany({ where: { id: { in: traineeIds } }, select: { id: true, centreId: true } });
+    if (trainees.length !== traineeIds.length) {
+      return reply.status(404).send({ error: 'Some trainees were not found' });
+    }
+    if (user.role !== 'ADMIN' && trainees.some((t) => t.centreId !== user.centreId)) {
+      return reply.status(403).send({ error: 'Some trainees do not belong to your training centre' });
     }
 
-    return markBatchAttendance(body, centreId, user.id);
+    const centreOf = new Map(trainees.map((t) => [t.id, t.centreId]));
+    const groups = new Map<string, any[]>();
+    for (const record of body.records) {
+      const centreId = centreOf.get(record.traineeId)!;
+      groups.set(centreId, [...(groups.get(centreId) ?? []), record]);
+    }
+
+    const results = [];
+    for (const [centreId, records] of groups) {
+      results.push(await markBatchAttendance({ ...body, records }, centreId, user.userId));
+    }
+    return {
+      count: results.reduce((n, r) => n + r.count, 0),
+      date: results[0].date,
+      session: results[0].session,
+      records: results.flatMap((r) => r.records),
+    };
   });
 
   // Get trainee attendance records

@@ -78,3 +78,7 @@ nginx/
 # ngrok binary
 ngrok.exe
 backend/ngrok.exe
+# AI service: collected camera photos (of people) and training output
+ai-service/dataset_capture/
+ai-service/runs/
+ai-service/debug_photos/

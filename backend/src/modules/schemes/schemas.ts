@@ -30,7 +30,7 @@ export const listSchemesSchema = z.object({
     page: z.coerce.number().int().positive().default(1),
     limit: z.coerce.number().int().positive().max(100).default(50),
     search: z.string().optional().or(z.literal('')),
-    isActive: z.coerce.boolean().optional(),
+    isActive: z.union([z.boolean(), z.enum(['true', 'false'])]).optional(),
   }),
 });
 

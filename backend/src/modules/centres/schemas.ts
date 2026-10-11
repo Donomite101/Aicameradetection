@@ -1,5 +1,23 @@
 import { z } from 'zod';
 
+const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use HH:mm');
+
+export const toolInputSchema = z.object({
+  id: z.string().optional(),
+  detectClass: z.string().min(1),
+  name: z.string().min(1).max(200).optional(),
+  quantity: z.number().int().positive(),
+});
+
+export const slotInputSchema = z.object({
+  id: z.string().optional(),
+  name: z.string().min(1).max(100),
+  startTime: hhmm,
+  endTime: hhmm,
+  daysOfWeek: z.array(z.number().int().min(0).max(6)).min(1).default([0, 1, 2, 3, 4, 5, 6]),
+  expectedTrainees: z.number().int().nonnegative().optional(),
+});
+
 export const createCentreSchema = z.object({
   body: z.object({
     code: z.string().min(3).max(20),
@@ -14,8 +32,12 @@ export const createCentreSchema = z.object({
     contactPerson: z.string().optional(),
     contactPhone: z.string().optional(),
     contactEmail: z.string().email().optional(),
-    schemeId: z.string().optional(),
-    schemeName: z.string().optional(),
+    area: z.string().max(200).optional(),
+    totalTrainees: z.number().int().nonnegative().default(0),
+    schemeId: z.string().min(1, 'Scheme is required'),
+    tools: z.array(toolInputSchema).default([]),
+    slots: z.array(slotInputSchema).default([]),
+    status: z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED']).optional().default('ACTIVE'),
   }),
 });
 
@@ -33,9 +55,12 @@ export const updateCentreSchema = z.object({
     contactPerson: z.string().optional(),
     contactPhone: z.string().optional(),
     contactEmail: z.string().email().optional(),
-    schemeId: z.string().optional(),
-    schemeName: z.string().optional(),
-    status: z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED', 'PENDING_VERIFICATION']).optional(),
+    area: z.string().max(200).optional(),
+    totalTrainees: z.number().int().nonnegative().optional(),
+    schemeId: z.string().min(1).optional(),
+    tools: z.array(toolInputSchema).optional(),
+    slots: z.array(slotInputSchema).optional(),
+    status: z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED']).optional(),
   }),
 });
 
@@ -47,7 +72,7 @@ export const listCentresSchema = z.object({
   query: z.object({
     page: z.coerce.number().int().positive().default(1),
     limit: z.coerce.number().int().positive().max(100).default(20),
-    status: z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED', 'PENDING_VERIFICATION']).optional(),
+    status: z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED']).optional(),
     search: z.string().optional(),
     state: z.string().optional(),
     schemeId: z.string().optional(),
@@ -60,7 +85,8 @@ export const addCameraSchema = z.object({
   params: z.object({ id: z.string() }),
   body: z.object({
     name: z.string().min(1).max(100),
-    rtspUrl: z.string().url(),
+    type: z.enum(['WEBCAM', 'PHONE', 'IP']).default('IP'),
+    rtspUrl: z.string().url().optional(), // IP cameras only
     roi: z.array(z.array(z.number())).optional(), // [[x1,y1], [x2,y2], ...]
   }),
 });
@@ -84,6 +110,7 @@ export const addInventoryItemSchema = z.object({
     unit: z.string().default('PCS'),
     specs: z.record(z.unknown()).optional(),
     location: z.string().optional(),
+    detectClass: z.string().optional(),
   }),
 });
 

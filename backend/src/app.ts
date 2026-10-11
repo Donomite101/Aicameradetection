@@ -1,10 +1,9 @@
-import fastify from 'fastify';
+import fastify, { FastifyInstance } from 'fastify';
 import { fastifyCors } from '@fastify/cors';
 import { fastifyHelmet } from '@fastify/helmet';
 import { fastifyRateLimit } from '@fastify/rate-limit';
 import { fastifySwagger } from '@fastify/swagger';
 import { fastifySwaggerUi } from '@fastify/swagger-ui';
-import { fastifyJwt } from '@fastify/jwt';
 import { fastifyMultipart } from '@fastify/multipart';
 import { serializerCompiler, validatorCompiler, ZodTypeProvider } from 'fastify-type-provider-zod';
 import { createServer } from 'http';
@@ -25,8 +24,11 @@ import { dashboardRoutes } from '@/modules/dashboard/routes';
 import { schemeRoutes } from '@/modules/schemes/routes';
 import { officerRoutes } from '@/modules/officers/routes';
 import { traineeRoutes } from '@/modules/trainees/routes';
+import { detectionRoutes } from '@/modules/detection/routes';
+import { aiRoutes } from '@/modules/ai/routes';
+import { startSessionFinalizer } from '@/modules/attendance/finalizer';
 
-export async function buildApp(): Promise<fastify.FastifyInstance> {
+export async function buildApp(): Promise<FastifyInstance> {
   const app = fastify({
     logger: {
       level: config.NODE_ENV === 'development' ? 'debug' : 'info',
@@ -42,6 +44,38 @@ export async function buildApp(): Promise<fastify.FastifyInstance> {
 
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
+
+  // Global error handler. It must be set BEFORE the routes are registered: each plugin takes a copy of the
+  // handler when it is loaded, and `await app.register(...)` loads it immediately.
+  app.setErrorHandler((error: any, request, reply) => {
+    request.log.error(error); // the full detail stays in the server log
+
+    let statusCode = error.statusCode || 500;
+    let message: string = error.message || 'An unexpected error occurred';
+    let label: string | undefined;
+    // Database errors: say what went wrong in plain words, never the query or file paths
+    if (error.code === 'P2002') {
+      statusCode = 409;
+      label = 'Conflict';
+      message = 'A record with the same unique value already exists';
+    } else if (error.code === 'P2025') {
+      statusCode = 404;
+      label = 'NotFound';
+      message = 'Record not found';
+    } else if (error.code === 'P2003') {
+      statusCode = 400;
+      label = 'BadRequest';
+      message = 'A related record does not exist';
+    } else if (statusCode >= 500) {
+      message = 'An unexpected error occurred';
+    }
+
+    reply.status(statusCode).send({
+      error: statusCode >= 500 ? 'InternalServerError' : label || error.name || 'Error',
+      message,
+      statusCode,
+    });
+  });
 
   // Security
   await app.register(fastifyHelmet, {
@@ -61,13 +95,6 @@ export async function buildApp(): Promise<fastify.FastifyInstance> {
     max: 1000,
     timeWindow: '1 minute',
     keyGenerator: (req) => req.ip,
-  });
-
-  // JWT
-  await app.register(fastifyJwt, {
-    secret: config.JWT_SECRET,
-    sign: { expiresIn: config.JWT_EXPIRES_IN },
-    verify: { algorithms: ['HS256'] },
   });
 
   // Multipart for file uploads
@@ -127,17 +154,8 @@ export async function buildApp(): Promise<fastify.FastifyInstance> {
   await app.register(schemeRoutes, { prefix: `${config.API_PREFIX}/schemes` });
   await app.register(officerRoutes, { prefix: `${config.API_PREFIX}/officers` });
   await app.register(traineeRoutes, { prefix: `${config.API_PREFIX}/trainees` });
-
-  // Global error handler
-  app.setErrorHandler((error, request, reply) => {
-    request.log.error(error);
-    const statusCode = error.statusCode || 500;
-    reply.status(statusCode).send({
-      error: error.name || 'InternalServerError',
-      message: error.message || 'An unexpected error occurred',
-      statusCode,
-    });
-  });
+  await app.register(detectionRoutes, { prefix: `${config.API_PREFIX}/detection` });
+  await app.register(aiRoutes, { prefix: `${config.API_PREFIX}/ai` });
 
   // Initialize WebSocket after routes
   await app.ready();
@@ -168,7 +186,8 @@ export async function start(): Promise<void> {
     
     // Use Fastify's built-in listen
     await app.listen({ port: config.PORT, host: '0.0.0.0' });
-    
+    startSessionFinalizer(app.log);
+
     console.log(`🚀 Server running on http://localhost:${config.PORT}`);
     console.log(`📚 API Docs: http://localhost:${config.PORT}/docs`);
   } catch (err) {

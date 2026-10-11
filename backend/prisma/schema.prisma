@@ -35,12 +35,16 @@ model Centre {
   latitude            Float
   longitude           Float
   sanctionedCapacity  Int
-  status              String          @default("PENDING_VERIFICATION") // ACTIVE, INACTIVE, SUSPENDED, PENDING_VERIFICATION
+  status              String          @default("ACTIVE") // ACTIVE, INACTIVE, SUSPENDED
   contactPerson       String?
   contactPhone        String?
   contactEmail        String?
+  area                String?
+  totalTrainees       Int             @default(0)
   schemeId            String?
+  scheme              Scheme?         @relation(fields: [schemeId], references: [id])
   schemeName          String?
+  classSlots          ClassSlot[]
   cameras             Camera[]
   inventory           InventoryItem[]
   attendanceRecords   AttendanceRecord[]
@@ -61,7 +65,8 @@ model Camera {
   centreId    String
   centre      Centre   @relation(fields: [centreId], references: [id], onDelete: Cascade)
   name        String
-  rtspUrl     String
+  type        String   @default("IP") // WEBCAM (laptop), PHONE (mobile app), IP (RTSP camera)
+  rtspUrl     String?             // only for IP cameras
   roi         String?             // JSON string of Region of Interest polygon coordinates
   isActive    Boolean  @default(true)
   lastSeenAt  DateTime?
@@ -82,6 +87,7 @@ model InventoryItem {
   unit        String            @default("PCS")
   specs       String?           // JSON string of specifications
   location    String?           // Room/area within centre
+  detectClass String?           // Detector class name (e.g. laptop) used for exact matching
   isActive    Boolean           @default(true)
   checks      InfrastructureCheck[]
   createdAt   DateTime          @default(now())
@@ -95,10 +101,23 @@ model AttendanceRecord {
   id            String           @id @default(cuid())
   centreId      String
   centre        Centre           @relation(fields: [centreId], references: [id], onDelete: Cascade)
+  classSlotId   String?
+  classSlot     ClassSlot?       @relation(fields: [classSlotId], references: [id], onDelete: SetNull)
   date          DateTime
-  session       String           // MORNING, AFTERNOON, EVENING, FULL_DAY
+  session       String           // Class slot name (or MORNING, AFTERNOON, EVENING, FULL_DAY for manual records)
   recordedCount Int
+  expectedCount Int              @default(0)
   detectedCount Int?
+  peakCount     Int?
+  finalCount    Int?             // highest steady headcount, fixed when the class ends
+  avgCount      Float?
+  minCount      Int?
+  sampleCount   Int              @default(0)
+  firstSeenAt   DateTime?
+  lastSeenAt    DateTime?
+  primaryCameraId String?        // the one camera whose readings count for this session (prevents double counting)
+  toolsSummary  String?          // JSON: [{itemId,name,detectClass,expected,maxDetected,lastDetected}]
+  finalizedAt   DateTime?
   discrepancy   Int?
   status        String           @default("PENDING") // PENDING, VERIFIED, DISCREPANT, UNDER_REVIEW
   confidence    Float?           // Average detection confidence
@@ -106,12 +125,44 @@ model AttendanceRecord {
   submittedBy   String?          // User ID who submitted
   verifiedBy    String?          // User ID who verified
   verifiedAt    DateTime?
+  snapshots     DetectionSnapshot[]
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
 
   @@unique([centreId, date, session])
   @@index([centreId, date])
+  @@index([classSlotId])
   @@index([status])
+}
+
+model ClassSlot {
+  id               String   @id @default(cuid())
+  centreId         String
+  centre           Centre   @relation(fields: [centreId], references: [id], onDelete: Cascade)
+  name             String
+  startTime        String   // HH:mm
+  endTime          String   // HH:mm
+  daysOfWeek       String   @default("1,2,3,4,5,6") // CSV of 0 (Sun) - 6 (Sat)
+  expectedTrainees Int?     // falls back to Centre.totalTrainees
+  isActive         Boolean  @default(true)
+  attendanceRecords AttendanceRecord[]
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([centreId])
+}
+
+model DetectionSnapshot {
+  id                 String           @id @default(cuid())
+  attendanceRecordId String
+  attendanceRecord   AttendanceRecord @relation(fields: [attendanceRecordId], references: [id], onDelete: Cascade)
+  cameraId           String
+  timestamp          DateTime         @default(now())
+  peopleCount        Int
+  confidence         Float
+  items              String           @default("[]") // JSON: [{name,count,confidence}]
+
+  @@index([attendanceRecordId, timestamp])
 }
 
 model InfrastructureCheck {
@@ -237,6 +288,7 @@ model Scheme {
   fundingType         String?  // CENTRAL, STATE, PPP
   targetBeneficiaries Int?
   isActive            Boolean  @default(true)
+  centres             Centre[]
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 

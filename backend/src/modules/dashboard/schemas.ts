@@ -9,8 +9,9 @@ export const dashboardSummarySchema = z.object({
 
 export const centresMapSchema = z.object({
   query: z.object({
-    status: z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED', 'PENDING_VERIFICATION']).optional(),
+    status: z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED']).optional(),
     bounds: z.string().optional(), // minLng,minLat,maxLng,maxLat
+    centreId: z.string().optional(),
   }),
 });
 
@@ -18,7 +19,7 @@ export const attendanceTrendsSchema = z.object({
   query: z.object({
     centreId: z.string().optional(),
     days: z.coerce.number().int().positive().default(30),
-    session: z.enum(['MORNING', 'AFTERNOON', 'EVENING', 'FULL_DAY']).optional(),
+    session: z.string().optional(),
   }),
 });
 

@@ -15,16 +15,31 @@ export async function dashboardRoutes(app: FastifyInstance) {
 
   // Centres for map view
   app.get('/centres/map', { schema: centresMapSchema, preHandler: [app.authenticate] }, async (request) => {
-    return getCentresForMap(request.query);
+    const user = request.user as any;
+    const query = { ...(request.query as any) };
+    if (user.role !== 'ADMIN' && user.centreId) {
+      query.centreId = user.centreId;
+    }
+    return getCentresForMap(query);
   });
 
   // Attendance trends
   app.get('/attendance/trends', { schema: attendanceTrendsSchema, preHandler: [app.authenticate] }, async (request) => {
-    return getAttendanceTrends(request.query);
+    const user = request.user as any;
+    const query = { ...(request.query as any) };
+    if (user.role !== 'ADMIN' && user.centreId) {
+      query.centreId = user.centreId;
+    }
+    return getAttendanceTrends(query);
   });
 
   // Infrastructure compliance
   app.get('/infrastructure/compliance', { schema: infrastructureComplianceSchema, preHandler: [app.authenticate] }, async (request) => {
-    return getInfrastructureCompliance(request.query);
+    const user = request.user as any;
+    const query = { ...(request.query as any) };
+    if (user.role !== 'ADMIN' && user.centreId) {
+      query.centreId = user.centreId;
+    }
+    return getInfrastructureCompliance(query);
   });
 }

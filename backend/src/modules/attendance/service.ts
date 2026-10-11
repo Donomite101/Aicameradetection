@@ -1,9 +1,29 @@
 import { prisma } from '@/shared/database/prisma';
-import { config } from '@/config';
+import { parseDateKey } from '@/modules/centres/schedule';
+import { parseToolsSummary } from '@/modules/detection/service';
+
+/** Adds attendance % and tool compliance to a stored record for API responses. */
+export function withDerived<T extends { expectedCount: number; recordedCount: number; detectedCount: number | null; finalCount: number | null; finalizedAt: Date | null; peakCount: number | null; toolsSummary: string | null }>(record: T) {
+  const tools = parseToolsSummary(record.toolsSummary);
+  const target = record.expectedCount > 0 ? record.expectedCount : record.recordedCount;
+  // After the class: the final count. During the class: the running average.
+  const isFinal = !!record.finalizedAt && record.finalCount != null;
+  const presentCount = isFinal ? record.finalCount : record.detectedCount;
+  return {
+    ...record,
+    isFinal,
+    presentCount,
+    tools,
+    toolsOk: tools.filter((t) => t.maxDetected >= t.expected).length,
+    toolsTotal: tools.length,
+    attendancePercent: target > 0 && presentCount != null ? Math.min(100, Math.round((presentCount / target) * 100)) : null,
+    peakAttendancePercent: target > 0 && record.peakCount != null ? Math.min(100, Math.round((record.peakCount / target) * 100)) : null,
+  };
+}
 import { SubmitAttendanceInput, ListAttendanceQuery, UpdateAttendanceInput, AttendanceSummaryQuery } from './schemas';
 
 export async function submitAttendance(data: SubmitAttendanceInput, userId: string) {
-  const date = new Date(data.date);
+  const date = parseDateKey(data.date);
 
   const existing = await prisma.attendanceRecord.findUnique({
     where: {
@@ -39,14 +59,20 @@ export async function submitAttendance(data: SubmitAttendanceInput, userId: stri
 }
 
 export async function getAttendanceById(id: string) {
-  return prisma.attendanceRecord.findUnique({
+  const record = await prisma.attendanceRecord.findUnique({
     where: { id },
-    include: { centre: true },
+    include: {
+      centre: { select: { id: true, name: true, code: true, totalTrainees: true } },
+      classSlot: true,
+      snapshots: { orderBy: { timestamp: 'asc' } },
+    },
   });
+  return record ? withDerived(record) : null;
 }
 
 export async function listAttendance(query: ListAttendanceQuery) {
   const { centreId, startDate, endDate, session, status } = query;
+  const classSlotId = (query as any).classSlotId;
   const search = (query as any).search;
   const pageNum = Math.max(1, parseInt(String(query.page || 1), 10) || 1);
   const take = Math.min(100, Math.max(1, parseInt(String(query.limit || 20), 10) || 20));
@@ -57,6 +83,7 @@ export async function listAttendance(query: ListAttendanceQuery) {
   const where: any = {};
   if (centreId) where.centreId = centreId;
   if (session) where.session = session;
+  if (classSlotId) where.classSlotId = classSlotId;
   if (status) where.status = status;
   if (search) {
     where.centre = {
@@ -68,11 +95,11 @@ export async function listAttendance(query: ListAttendanceQuery) {
   }
   if (startDate || endDate) {
     const dateFilter: any = {};
-    if (startDate && !isNaN(new Date(startDate).getTime())) {
-      dateFilter.gte = new Date(startDate);
+    if (startDate && !isNaN(parseDateKey(startDate).getTime())) {
+      dateFilter.gte = parseDateKey(startDate);
     }
-    if (endDate && !isNaN(new Date(endDate).getTime())) {
-      dateFilter.lte = new Date(endDate);
+    if (endDate && !isNaN(parseDateKey(endDate).getTime())) {
+      dateFilter.lte = parseDateKey(endDate);
     }
     if (Object.keys(dateFilter).length > 0) {
       where.date = dateFilter;
@@ -85,13 +112,16 @@ export async function listAttendance(query: ListAttendanceQuery) {
       skip,
       take,
       orderBy: { [sortBy]: sortOrder },
-      include: { centre: { select: { id: true, name: true, code: true } } },
+      include: {
+        centre: { select: { id: true, name: true, code: true } },
+        classSlot: { select: { id: true, name: true, startTime: true, endTime: true } },
+      },
     }),
     prisma.attendanceRecord.count({ where }),
   ]);
 
   return {
-    data: records,
+    data: records.map(withDerived),
     pagination: { page: pageNum, limit: take, total, totalPages: Math.ceil(total / take) },
   };
 }
@@ -109,66 +139,13 @@ export async function updateAttendance(id: string, data: UpdateAttendanceInput, 
   });
 }
 
-export async function processDetectionResult(
-  centreId: string,
-  date: Date,
-  session: string,
-  detectedCount: number,
-  confidence: number,
-  metadata?: Record<string, unknown>
-) {
-  const record = await prisma.attendanceRecord.findUnique({
-    where: {
-      centreId_date_session: { centreId, date, session },
-    },
-  });
-
-  if (!record) {
-    // Create record with detected count if no manual record exists
-    return prisma.attendanceRecord.create({
-      data: {
-        centreId,
-        date,
-        session,
-        recordedCount: 0,
-        detectedCount,
-        discrepancy: detectedCount,
-        confidence,
-        status: 'DISCREPANT',
-        metadata,
-      },
-    });
-  }
-
-  const discrepancy = detectedCount - record.recordedCount;
-  const absDiscrepancy = Math.abs(discrepancy);
-
-  let status: 'PENDING' | 'VERIFIED' | 'DISCREPANT' | 'UNDER_REVIEW' = record.status;
-  if (absDiscrepancy > config.ATTENDANCE_DISCREPANCY_THRESHOLD) {
-    status = 'DISCREPANT';
-  } else if (record.status === 'PENDING') {
-    status = 'VERIFIED';
-  }
-
-  return prisma.attendanceRecord.update({
-    where: { id: record.id },
-    data: {
-      detectedCount,
-      discrepancy,
-      confidence,
-      status,
-      metadata: { ...(record.metadata as object), ...metadata },
-    },
-  });
-}
-
 export async function getAttendanceSummary(centreId: string, query: AttendanceSummaryQuery) {
   const { startDate, endDate } = query;
   const where: any = { centreId };
   if (startDate || endDate) {
     where.date = {};
-    if (startDate) where.date.gte = new Date(startDate);
-    if (endDate) where.date.lte = new Date(endDate);
+    if (startDate) where.date.gte = parseDateKey(startDate);
+    if (endDate) where.date.lte = parseDateKey(endDate);
   }
 
   const records = await prisma.attendanceRecord.findMany({

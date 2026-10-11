@@ -5,7 +5,7 @@ import { CreateOfficerInput, UpdateOfficerInput, ListOfficersQuery } from './sch
 export async function createOfficer(data: CreateOfficerInput) {
   const existing = await prisma.user.findUnique({ where: { email: data.email } });
   if (existing) {
-    throw new Error('User with this email already exists');
+    throw Object.assign(new Error('User with this email already exists'), { statusCode: 409 });
   }
 
   const passwordHash = await bcrypt.hash(data.password, 12);

@@ -1,5 +1,7 @@
 import { FastifyInstance } from 'fastify';
-import { loginSchema, registerSchema, refreshTokenSchema, changePasswordSchema, forgotPasswordSchema, resetPasswordSchema } from './schemas';
+import { prisma } from '@/shared/database/prisma';
+import { config } from '@/config';
+import { updateProfileSchema, loginSchema, registerSchema, refreshTokenSchema, changePasswordSchema, forgotPasswordSchema, resetPasswordSchema } from './schemas';
 import {
   authenticateUser,
   registerUser,
@@ -10,12 +12,16 @@ import {
   generateResetToken,
   resetPassword,
   getUserById,
+  invalidateUserCache,
 } from './service';
+
+// Brute-force protection: far stricter than the global limit
+const strictLimit = { rateLimit: { max: 10, timeWindow: '1 minute' } };
 
 export async function authRoutes(app: FastifyInstance) {
   // Login
-  app.post('/login', { schema: loginSchema }, async (request, reply) => {
-    const { email, password } = request.body;
+  app.post('/login', { schema: loginSchema, config: strictLimit }, async (request, reply) => {
+    const { email, password } = request.body as any;
     const { user, error } = await authenticateUser(email, password);
 
     if (error || !user) {
@@ -26,7 +32,7 @@ export async function authRoutes(app: FastifyInstance) {
       userId: user.id,
       email: user.email,
       role: user.role,
-      centreId: user.centreId,
+      centreId: user.centreId || undefined,
     };
 
     const accessToken = await createAccessToken(payload);
@@ -46,19 +52,30 @@ export async function authRoutes(app: FastifyInstance) {
     };
   });
 
-  // Register (admin only in production)
-  app.post('/register', { schema: registerSchema }, async (request, reply) => {
-    const { user, error } = await registerUser(request.body);
+  // Register: only the very first account (set-up) is open; after that only an admin can create accounts
+  const registerGuard = async (request: any, reply: any) => {
+    if ((await prisma.user.count()) === 0) return;
+    await app.authenticate(request, reply);
+    if (reply.sent) return reply;
+    await app.requireRole('ADMIN')(request, reply);
+    if (reply.sent) return reply;
+  };
 
-    if (error) {
-      return reply.status(400).send({ error });
+  app.post('/register', { schema: registerSchema, preHandler: [registerGuard], config: strictLimit }, async (request, reply) => {
+    const isFirstAccount = (await prisma.user.count()) === 0;
+    const input = { ...(request.body as any) };
+    if (isFirstAccount) input.role = 'ADMIN'; // the account that sets the system up must be able to run it
+    const { user, error } = await registerUser(input);
+
+    if (error || !user) {
+      return reply.status(400).send({ error: error || 'Failed to register' });
     }
 
     const payload = {
       userId: user.id,
       email: user.email,
       role: user.role,
-      centreId: user.centreId,
+      centreId: user.centreId || undefined,
     };
 
     const accessToken = await createAccessToken(payload);
@@ -80,7 +97,7 @@ export async function authRoutes(app: FastifyInstance) {
 
   // Refresh token
   app.post('/refresh', { schema: refreshTokenSchema }, async (request, reply) => {
-    const { refreshToken } = request.body;
+    const { refreshToken } = request.body as any;
     const payload = await verifyRefreshToken(refreshToken);
 
     if (!payload) {
@@ -96,7 +113,7 @@ export async function authRoutes(app: FastifyInstance) {
       userId: user.id,
       email: user.email,
       role: user.role,
-      centreId: user.centreId,
+      centreId: user.centreId || undefined,
     };
 
     const accessToken = await createAccessToken(newPayload);
@@ -107,7 +124,7 @@ export async function authRoutes(app: FastifyInstance) {
 
   // Get current user
   app.get('/me', { preHandler: [app.authenticate] }, async (request, reply) => {
-    const user = await getUserById(request.user.userId);
+    const user = await getUserById((request.user as any).userId);
     if (!user) {
       return reply.status(404).send({ error: 'User not found' });
     }
@@ -125,10 +142,21 @@ export async function authRoutes(app: FastifyInstance) {
     };
   });
 
+  // Update own profile (the sign-in email can only be changed by an admin)
+  app.patch('/me', { preHandler: [app.authenticate], schema: updateProfileSchema }, async (request, reply) => {
+    const userId = (request.user as any).userId;
+    const { fullName } = request.body as any;
+    const user = await prisma.user.update({ where: { id: userId }, data: { fullName }, include: { centre: true } });
+    invalidateUserCache(userId);
+    return {
+      user: { id: user.id, email: user.email, fullName: user.fullName, role: user.role, centreId: user.centreId, centre: user.centre },
+    };
+  });
+
   // Change password
   app.post('/change-password', { preHandler: [app.authenticate], schema: changePasswordSchema }, async (request, reply) => {
-    const { currentPassword, newPassword } = request.body;
-    const { success, error } = await changePassword(request.user.userId, currentPassword, newPassword);
+    const { currentPassword, newPassword } = request.body as any;
+    const { success, error } = await changePassword((request.user as any).userId, currentPassword, newPassword);
 
     if (!success) {
       return reply.status(400).send({ error });
@@ -138,22 +166,22 @@ export async function authRoutes(app: FastifyInstance) {
   });
 
   // Forgot password
-  app.post('/forgot-password', { schema: forgotPasswordSchema }, async (request, reply) => {
-    const { email } = request.body;
+  app.post('/forgot-password', { schema: forgotPasswordSchema, config: strictLimit }, async (request, reply) => {
+    const { email } = request.body as any;
     const { token, error } = await generateResetToken(email);
 
-    // In production, send email with token
-    // For development, return token in response
-    if (config.NODE_ENV === 'development') {
-      return { message: 'Reset token generated', resetToken: token };
+    // The token must never be returned to the caller: whoever knows an email address could otherwise take the account.
+    // There is no e-mail sender yet, so in development it is printed in this server's own log.
+    if (token && config.NODE_ENV !== 'production') {
+      request.log.warn(`PASSWORD RESET TOKEN for ${email} (shown only here, never sent to the browser): ${token}`);
     }
 
     return { message: 'If the email exists, a reset link will be sent' };
   });
 
   // Reset password
-  app.post('/reset-password', { schema: resetPasswordSchema }, async (request, reply) => {
-    const { token, password } = request.body;
+  app.post('/reset-password', { schema: resetPasswordSchema, config: strictLimit }, async (request, reply) => {
+    const { token, password } = request.body as any;
     const { success, error } = await resetPassword(token, password);
 
     if (!success) {

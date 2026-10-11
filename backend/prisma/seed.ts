@@ -85,8 +85,9 @@ async function main() {
       contactPerson: 'Rajesh Kumar',
       contactPhone: '+91-11-2755XXXX',
       contactEmail: 'delhi.tc@skill.gov.in',
-      schemeId: 'PMKVY-2024',
-      schemeName: 'Pradhan Mantri Kaushal Vikas Yojana',
+      schemeCode: 'PMKVY-4.0',
+      area: 'Rohini',
+      totalTrainees: 60,
     },
     {
       code: 'TC-MUM-002',
@@ -102,8 +103,9 @@ async function main() {
       contactPerson: 'Priya Sharma',
       contactPhone: '+91-22-2834XXXX',
       contactEmail: 'mumbai.sdi@skill.gov.in',
-      schemeId: 'PMKVY-2024',
-      schemeName: 'Pradhan Mantri Kaushal Vikas Yojana',
+      schemeCode: 'PMKVY-4.0',
+      area: 'Andheri East',
+      totalTrainees: 80,
     },
     {
       code: 'TC-BLR-003',
@@ -119,17 +121,29 @@ async function main() {
       contactPerson: 'Arjun Reddy',
       contactPhone: '+91-80-2852XXXX',
       contactEmail: 'blr.atc@skill.gov.in',
-      schemeId: 'PMKVY-2024',
-      schemeName: 'Pradhan Mantri Kaushal Vikas Yojana',
+      schemeCode: 'DDU-GKY',
+      area: 'Electronic City',
+      totalTrainees: 70,
     },
   ];
 
-  for (const centreData of centres) {
+  for (const { schemeCode, ...centreData } of centres) {
+    const scheme = await prisma.scheme.findUnique({ where: { code: schemeCode } });
     const centre = await prisma.centre.upsert({
       where: { code: centreData.code },
-      update: {},
-      create: centreData,
+      update: { schemeId: scheme?.id, schemeName: scheme?.name, area: centreData.area, totalTrainees: centreData.totalTrainees },
+      create: { ...centreData, schemeId: scheme?.id, schemeName: scheme?.name },
     });
+
+    if ((await prisma.classSlot.count({ where: { centreId: centre.id } })) === 0) {
+      await prisma.classSlot.createMany({
+        data: [
+          { centreId: centre.id, name: 'Morning Batch', startTime: '08:00', endTime: '11:00' },
+          { centreId: centre.id, name: 'Afternoon Batch', startTime: '12:00', endTime: '15:00' },
+          { centreId: centre.id, name: 'Evening Batch', startTime: '16:00', endTime: '19:00' },
+        ],
+      });
+    }
     console.log('✅ Created centre:', centre.code);
 
     // Add cameras

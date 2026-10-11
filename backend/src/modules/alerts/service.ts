@@ -108,6 +108,7 @@ export async function createAlert(data: {
   return prisma.alert.create({
     data: {
       ...data,
+      metadata: typeof data.metadata === 'string' ? data.metadata : JSON.stringify(data.metadata),
       status: 'OPEN',
     },
     include: { centre: true },

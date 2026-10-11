@@ -37,14 +37,22 @@ export async function attendanceRoutes(app: FastifyInstance) {
   });
 
   // Get attendance summary for a centre
-  app.get('/centre/:id/summary', { schema: attendanceSummarySchema, preHandler: [app.authenticate] }, async (request) => {
+  app.get('/centre/:id/summary', { schema: attendanceSummarySchema, preHandler: [app.authenticate] }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    return getAttendanceSummary(id, request.query);
+    const user = request.user as any;
+    if (user.role !== 'ADMIN' && user.centreId && user.centreId !== id) {
+      return reply.status(403).send({ error: 'Access denied: You can only view attendance for your assigned training centre' });
+    }
+    return getAttendanceSummary(id, request.query as any);
   });
 
   // Get recent discrepancies
-  app.get('/centre/:id/discrepancies', { schema: attendanceSummarySchema, preHandler: [app.authenticate] }, async (request) => {
+  app.get('/centre/:id/discrepancies', { schema: attendanceSummarySchema, preHandler: [app.authenticate] }, async (request, reply) => {
     const { id } = request.params as { id: string };
+    const user = request.user as any;
+    if (user.role !== 'ADMIN' && user.centreId && user.centreId !== id) {
+      return reply.status(403).send({ error: 'Access denied: You can only view attendance for your assigned training centre' });
+    }
     return getRecentDiscrepancies(id);
   });
 
@@ -55,12 +63,24 @@ export async function attendanceRoutes(app: FastifyInstance) {
     if (!record) {
       return reply.status(404).send({ error: 'Attendance record not found' });
     }
+    const user = request.user as any;
+    if (user.role !== 'ADMIN' && user.centreId && record.centreId !== user.centreId) {
+      return reply.status(403).send({ error: 'Access denied: Attendance record belongs to another training centre' });
+    }
     return record;
   });
 
   // Update attendance record
-  app.patch('/:id', { schema: updateAttendanceSchema, preHandler: [app.authenticate] }, async (request) => {
+  app.patch('/:id', { schema: updateAttendanceSchema, preHandler: [app.authenticate] }, async (request, reply) => {
     const { id } = request.params as { id: string };
-    return updateAttendance(id, request.body, request.user!.userId);
+    const record = await getAttendanceById(id);
+    if (!record) {
+      return reply.status(404).send({ error: 'Attendance record not found' });
+    }
+    const user = request.user as any;
+    if (user.role !== 'ADMIN' && user.centreId && record.centreId !== user.centreId) {
+      return reply.status(403).send({ error: 'Access denied: Attendance record belongs to another training centre' });
+    }
+    return updateAttendance(id, request.body as any, user.id || user.userId);
   });
 }

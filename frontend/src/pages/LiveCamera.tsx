@@ -1,44 +1,45 @@
 'use client';
 
 /**
- * LiveCameraPage — Full-screen AI person detection view with Start/Stop control
- * Route: /live
+ * Live Camera — the camera is opened by THIS web page (so it can be any laptop), the picture plays right here with
+ * no delay, and a small copy is sent to the backend about once a second. The backend's AI counts people and tools,
+ * and the boxes it sends back are drawn on top of the live picture. Counts are saved to attendance only while a
+ * class is running.
  */
 
 import * as React from 'react';
 import {
-  Video,
   VideoOff,
   Users,
   Activity,
   Wifi,
   WifiOff,
-  RefreshCw,
-  Power,
-  PowerOff,
-  ChevronRight,
-  CheckCircle2,
   Clock,
-  Zap,
   Play,
   Square,
   Loader2,
   Package,
-  HardHat,
   Wrench,
+  CheckCircle2,
+  AlertTriangle,
+  Zap,
 } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { useQuery } from '@tanstack/react-query';
 import { ws } from '@/services/websocket';
-import { centresApi, dashboardApi } from '@/services/api';
+import { api, centresApi, dashboardApi } from '@/services/api';
+import { aiApi } from '@/services/ai';
 import { CurrentClassPanel } from '@/components/CurrentClassPanel';
 import { to12h, describeNext } from '@/components/ClassSessionScheduleBanner';
 import { useAuthStore } from '@/store/auth';
 import { cn } from '@/lib/utils';
 
-const AI_SERVICE_URL = import.meta.env.VITE_AI_SERVICE_URL || 'http://localhost:8000';
+const SEND_WIDTH = 768;        // the picture sent for counting (the AI looks at ~640 px anyway)
+const JPEG_QUALITY = 0.72;
+const MIN_GAP_MS = 600;        // never send faster than this; the next picture goes as soon as the last answer is back
+const BOX_LIFETIME_MS = 5000;  // boxes disappear if no answer has arrived for this long
 
 interface DetectedItem {
   name: string;
@@ -46,487 +47,533 @@ interface DetectedItem {
   confidence: number;
 }
 
-interface SlotInfo {
-  id: string;
-  name: string;
-  startTime: string;
-  endTime: string;
-  startsAt?: string;
+interface Detection {
+  label: string;
+  confidence: number;
+  box: number[]; // x1, y1, x2, y2 as fractions (0..1) of the picture
 }
 
-interface DetectionEvent {
+interface FrameResult {
+  people: number;
+  confidence: number;
+  items: DetectedItem[];
+  detections: Detection[];
+  recorded: boolean;
+  reason?: string | null;
+  countingCamera?: string | null;
+  timing?: { analyseMs: number; recordMs: number };
+}
+
+interface HistoryEntry {
   timestamp: string;
   count: number;
   confidence: number;
-  session: string;
-  items?: DetectedItem[];
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+function friendlyCameraError(e: any): string {
+  switch (e?.name) {
+    case 'NotAllowedError':
+      return 'Camera permission is blocked. Click the camera icon in the address bar, allow it, then press Start camera again.';
+    case 'NotFoundError':
+      return 'No camera was found on this computer.';
+    case 'NotReadableError':
+      return 'The camera is being used by another program. Close it and try again.';
+    default:
+      return e?.message || 'Could not open the camera.';
+  }
 }
 
 export function LiveCameraPage() {
   const { user } = useAuthStore();
-  const centreId = user?.centreId;
+  const isAdmin = user?.role === 'ADMIN';
 
+  // Admins pick the centre they are filming; officers always film their own
+  const [adminCentreId, setAdminCentreId] = React.useState('');
+  const { data: centresData } = useQuery<any>({
+    queryKey: ['live-centres'],
+    queryFn: () => centresApi.list({ limit: 100 }),
+    enabled: isAdmin,
+  });
+  const centreOptions: { id: string; name: string }[] = centresData?.data || [];
+  React.useEffect(() => {
+    if (isAdmin && !adminCentreId && centreOptions.length) setAdminCentreId(centreOptions[0].id);
+  }, [isAdmin, adminCentreId, centreOptions]);
+  const centreId = isAdmin ? adminCentreId : user?.centreId;
+
+  // ── camera state ──────────────────────────────────────────────
+  const videoRef = React.useRef<HTMLVideoElement>(null);
+  const overlayRef = React.useRef<HTMLCanvasElement>(null);
+  const streamRef = React.useRef<MediaStream | null>(null);
+  const [cameraOn, setCameraOn] = React.useState(false);
+  const [starting, setStarting] = React.useState(false);
+  const [cameraError, setCameraError] = React.useState<string | null>(null);
+  const [devices, setDevices] = React.useState<MediaDeviceInfo[]>([]);
+  const [deviceId, setDeviceId] = React.useState(() => {
+    try { return localStorage.getItem('live-camera-device') || ''; } catch { return ''; }
+  });
+  const [autoStart, setAutoStart] = React.useState(() => {
+    try { return localStorage.getItem('live-camera-autostart') === 'true'; } catch { return false; }
+  });
+
+  // ── results ───────────────────────────────────────────────────
   const [count, setCount] = React.useState(0);
   const [confidence, setConfidence] = React.useState(0);
   const [items, setItems] = React.useState<DetectedItem[]>([]);
-  const [session, setSession] = React.useState('');
-  const [activeSlot, setActiveSlot] = React.useState<SlotInfo | null>(null);
-  const [nextSlot, setNextSlot] = React.useState<SlotInfo | null>(null);
-  const [autoStarted, setAutoStarted] = React.useState(false);
-  const [aiCentreId, setAiCentreId] = React.useState<string | undefined>();
-  const [sourceMode, setSourceMode] = React.useState<'webcam' | 'phone'>('webcam');
-  const [switching, setSwitching] = React.useState(false);
-  const [snapTick, setSnapTick] = React.useState(0);
-  const [lastUpdate, setLastUpdate] = React.useState('');
-  const [aiOnline, setAiOnline] = React.useState(false);  // Python service reachable
-  const [detecting, setDetecting] = React.useState(false); // Camera actively running
-  const [wsConnected, setWsConnected] = React.useState(false);
-  const [videoError, setVideoError] = React.useState(false);
-  const [history, setHistory] = React.useState<DetectionEvent[]>([]);
-  const [framesProcessed, setFramesProcessed] = React.useState(0);
+  const [detections, setDetections] = React.useState<Detection[]>([]);
+  const [lastResult, setLastResult] = React.useState<FrameResult | null>(null);
+  const [lastResultAt, setLastResultAt] = React.useState(0);
+  const [latencyMs, setLatencyMs] = React.useState<number | null>(null);
+  const [connectionError, setConnectionError] = React.useState<string | null>(null);
+  const [history, setHistory] = React.useState<HistoryEntry[]>([]);
   const [pulse, setPulse] = React.useState(false);
-  const [toggling, setToggling] = React.useState(false);
-  const imgRef = React.useRef<HTMLImageElement>(null);
-  const historyTick = React.useRef(0);
-  const pollRef = React.useRef<NodeJS.Timeout>();
-  const videoUrl = `${AI_SERVICE_URL}/video_feed`;
+  const [wsConnected, setWsConnected] = React.useState(false);
 
-  // ── Poll AI status ────────────────────────────────────────────
-  const poll = React.useCallback(async () => {
-    try {
-      const res = await fetch(`${AI_SERVICE_URL}/status`, { signal: AbortSignal.timeout(3000) });
-      if (res.ok) {
-        const data = await res.json();
-        setAiOnline(true);
-        const mode: 'webcam' | 'phone' = data.sourceMode === 'phone' ? 'phone' : 'webcam';
-        setSourceMode(mode);
-        // In phone mode "active" means the app has sent a photo recently
-        setDetecting(mode === 'phone' ? !!data.phoneActive : (data.active ?? false));
-        setCount(data.currentCount ?? 0);
-        setConfidence(data.confidence ?? 0);
-        setItems(data.items ?? []);
-        setSession(data.session ?? '');
-        setActiveSlot(data.activeSlot ?? null);
-        setNextSlot(data.nextSlot ?? null);
-        setAutoStarted(!!data.autoStarted);
-        setAiCentreId(data.centreId || undefined);
-        setLastUpdate(data.timestamp ? new Date(data.timestamp).toLocaleTimeString() : '');
-        setFramesProcessed(data.framesProcessed ?? 0);
-        if (data.active && data.currentCount > 0) {
-          setPulse(true);
-          setTimeout(() => setPulse(false), 350);
-        }
-      } else {
-        setAiOnline(false);
-        setDetecting(false);
-      }
-    } catch {
-      setAiOnline(false);
-      setDetecting(false);
-    }
+  // ── schedule + AI service ─────────────────────────────────────
+  const { data: schedule } = useQuery<any>({
+    queryKey: ['live-schedule', centreId],
+    queryFn: () => centresApi.schedule(centreId as string),
+    enabled: !!centreId,
+    refetchInterval: 15_000,
+  });
+  const activeSlot = schedule?.activeSlot ?? null;
+  const nextSlot = schedule?.nextSlot ?? null;
 
-    // Fetch history (not on every 2-second status poll)
-    historyTick.current += 1;
-    if (historyTick.current % 5 !== 1) return;
-    try {
-      const res = await fetch(`${AI_SERVICE_URL}/history?limit=30`, { signal: AbortSignal.timeout(3000) });
-      if (res.ok) {
-        const h: DetectionEvent[] = await res.json();
-        setHistory(h.reverse());
-      }
-    } catch { /* ignore */ }
-  }, []);
-
-  // ── Start / Stop detection ────────────────────────────────────
-  const toggleDetection = async () => {
-    setToggling(true);
-    try {
-      const endpoint = detecting ? '/stop' : '/start';
-      const res = await fetch(`${AI_SERVICE_URL}${endpoint}`, {
-        method: 'POST',
-        signal: AbortSignal.timeout(10000),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setDetecting(data.active ?? !detecting);
-        if (!data.active) {
-          setVideoError(false);
-        }
-      }
-    } catch (err) {
-      console.error('Toggle failed:', err);
-    } finally {
-      setToggling(false);
-      // Re-poll after a short delay
-      setTimeout(poll, 1000);
-    }
-  };
-
-  // ── Switch camera source (laptop webcam <-> phone app) ────────
-  const switchSource = async (mode: 'webcam' | 'phone') => {
-    if (mode === sourceMode || switching) return;
-    setSwitching(true);
-    try {
-      const res = await fetch(`${AI_SERVICE_URL}/mode`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode }),
-        signal: AbortSignal.timeout(10000),
-      });
-      if (res.ok) setSourceMode(mode);
-    } catch (err) {
-      console.error('Switch failed:', err);
-    } finally {
-      setSwitching(false);
-      setTimeout(poll, 500);
-    }
-  };
-
-  // Phone frames arrive as one photo at a time: refresh the preview every 2 seconds
+  const { dataUpdatedAt: aiSeenAt } = useQuery<any>({
+    queryKey: ['live-ai-status'],
+    queryFn: () => aiApi.status(),
+    refetchInterval: 4000,
+    retry: false,
+  });
+  // "online" unless the AI service has not answered for a while (one slow answer is not an outage)
+  const [now, setNow] = React.useState(() => Date.now());
   React.useEffect(() => {
-    if (sourceMode !== 'phone' || !detecting) return;
-    const t = setInterval(() => setSnapTick((n) => n + 1), 2000);
+    const t = setInterval(() => setNow(Date.now()), 2000);
     return () => clearInterval(t);
-  }, [sourceMode, detecting]);
+  }, []);
+  const aiOnline = aiSeenAt > 0 && now - aiSeenAt < 15_000;
 
-  // ── Registered tools for the centre being monitored ───────────
-  const effectiveCentreId = centreId || aiCentreId;
   const { data: centreData } = useQuery<any>({
-    queryKey: ['centre', effectiveCentreId],
-    queryFn: () => centresApi.get(effectiveCentreId as string),
-    enabled: !!effectiveCentreId,
+    queryKey: ['centre', centreId],
+    queryFn: () => centresApi.get(centreId as string),
+    enabled: !!centreId,
     staleTime: 60_000,
   });
-  // The class running now, with the same numbers the dashboard shows
-  const { data: summaryData, refetch: refetchSummary } = useQuery<any>({
-    queryKey: ['live-today-sessions', effectiveCentreId],
-    queryFn: () => dashboardApi.summary({ days: 1, centreId: effectiveCentreId }),
-    enabled: !!effectiveCentreId,
-    refetchInterval: 10_000,
-  });
-  const todaySessions = summaryData?.todaySessions ?? [];
-  React.useEffect(() => {
-    const unsub = ws.on('attendance:update', () => refetchSummary());
-    return () => unsub();
-  }, [refetchSummary]);
-
   const registeredTools: { id: string; name: string; detectClass: string; quantity: number }[] =
     (centreData?.inventory || []).filter((i: any) => i.detectClass);
 
-  // ── WebSocket ─────────────────────────────────────────────────
+  const { data: summaryData, refetch: refetchSummary } = useQuery<any>({
+    queryKey: ['live-today-sessions', centreId],
+    queryFn: () => dashboardApi.summary({ days: 1, centreId }),
+    enabled: !!centreId,
+    refetchInterval: 10_000,
+  });
+  const todaySessions = summaryData?.todaySessions ?? [];
+
   React.useEffect(() => {
     const socket = ws.connect();
     setWsConnected(socket.connected);
-
     const u1 = ws.on('connected', () => setWsConnected(true));
     const u2 = ws.on('disconnected', () => setWsConnected(false));
-    const u3 = ws.on('detection:live', (data: any) => {
-      if (!centreId || data.centreId === centreId) {
-        setCount(data.detectedCount);
-        setConfidence(data.confidence ?? 0);
-        if (data.items) setItems(data.items);
-        setSession(data.session ?? '');
-        setLastUpdate(new Date(data.timestamp).toLocaleTimeString());
-        setPulse(true);
-        setTimeout(() => setPulse(false), 350);
-        setHistory(prev => [{
-          timestamp: new Date(data.timestamp).toISOString(),
-          count: data.detectedCount,
-          confidence: data.confidence ?? 0,
-          items: data.items,
-          session: data.session ?? '',
-        }, ...prev].slice(0, 30));
+    const u3 = ws.on('attendance:update', () => refetchSummary());
+    return () => { u1(); u2(); u3(); };
+  }, [refetchSummary]);
+
+  // ── start / stop the camera ───────────────────────────────────
+  const stopCamera = React.useCallback(() => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null;
+    if (videoRef.current) videoRef.current.srcObject = null;
+    setCameraOn(false);
+    setDetections([]);
+  }, []);
+
+  const startCamera = React.useCallback(async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraError('This browser only allows the camera on https:// or http://localhost. Open the web app at http://localhost:5173 on this laptop.');
+      return;
+    }
+    setStarting(true);
+    setCameraError(null);
+    try {
+      const video = (id?: string): MediaStreamConstraints => ({
+        video: { ...(id ? { deviceId: { exact: id } } : {}), width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+        audio: false,
+      });
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia(video(deviceId || undefined));
+      } catch (e: any) {
+        if (deviceId && e?.name === 'OverconstrainedError') stream = await navigator.mediaDevices.getUserMedia(video()); // saved camera is gone
+        else throw e;
       }
-    });
-
-    const u4 = ws.on('infrastructure:update', (data: any) => {
-      if ((!centreId || data.centreId === centreId) && data.items) {
-        setItems(data.items);
+      streamRef.current = stream;
+      const el = videoRef.current;
+      if (el) {
+        el.srcObject = stream;
+        await el.play().catch(() => undefined);
       }
-    });
+      setCameraOn(true);
+      const list = await navigator.mediaDevices.enumerateDevices();
+      setDevices(list.filter((d) => d.kind === 'videoinput'));
+    } catch (e: any) {
+      setCameraError(friendlyCameraError(e));
+      setCameraOn(false);
+    } finally {
+      setStarting(false);
+    }
+  }, [deviceId]);
 
-    return () => { u1(); u2(); u3(); u4(); };
-  }, [centreId]);
+  React.useEffect(() => () => {
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+  }, []);
 
-  // ── Polling ───────────────────────────────────────────────────
+  // Start by itself when this page opens (or a class begins) if the user asked for that
+  const autoTried = React.useRef<string>('');
   React.useEffect(() => {
-    poll();
-    pollRef.current = setInterval(poll, 2000);
-    return () => clearInterval(pollRef.current);
-  }, [poll]);
+    if (!autoStart || cameraOn || starting || cameraError || !centreId) return;
+    const key = `${centreId}:${activeSlot?.id ?? 'none'}`;
+    if (autoTried.current === key) return;
+    autoTried.current = key;
+    startCamera();
+  }, [autoStart, cameraOn, starting, cameraError, centreId, activeSlot?.id, startCamera]);
 
-  const maxCount = Math.max(...history.map(h => h.count), 1);
+  const toggleAutoStart = (value: boolean) => {
+    setAutoStart(value);
+    autoTried.current = '';
+    try { localStorage.setItem('live-camera-autostart', String(value)); } catch { /* ignore */ }
+  };
+
+  const deviceLabel = React.useMemo(() => {
+    const d = devices.find((x) => x.deviceId === (deviceId || streamRef.current?.getVideoTracks()[0]?.getSettings().deviceId));
+    return d?.label || 'Browser webcam';
+  }, [devices, deviceId, cameraOn]);
+
+  // ── the sending loop: grab a picture, send it, draw the answer, repeat ──
+  React.useEffect(() => {
+    if (!cameraOn || !centreId) return;
+    let cancelled = false;
+    const canvas = document.createElement('canvas');
+
+    (async () => {
+      let failures = 0;
+      while (!cancelled) {
+        const started = performance.now();
+        const video = videoRef.current;
+        if (video && video.readyState >= 2 && video.videoWidth) {
+          try {
+            const w = Math.min(SEND_WIDTH, video.videoWidth);
+            canvas.width = w;
+            canvas.height = Math.round((w * video.videoHeight) / video.videoWidth);
+            canvas.getContext('2d')!.drawImage(video, 0, 0, canvas.width, canvas.height);
+            const blob: Blob = await new Promise((resolve, reject) =>
+              canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('Could not encode the picture'))), 'image/jpeg', JPEG_QUALITY)
+            );
+            const result: FrameResult = await api.post('/detection/frame', blob, {
+              params: { centreId: isAdmin ? centreId : undefined, cameraId: 'webcam-browser', deviceName: deviceLabel, source: 'browser' },
+              headers: { 'Content-Type': 'image/jpeg' },
+              timeout: 25_000,
+            }) as any;
+            if (cancelled) return;
+            failures = 0;
+            setConnectionError(null);
+            setCount(result.people ?? 0);
+            setConfidence(result.confidence ?? 0);
+            setItems(result.items ?? []);
+            setDetections(result.detections ?? []);
+            setLastResult(result);
+            setLastResultAt(Date.now());
+            setLatencyMs(Math.round(performance.now() - started));
+            setPulse(true);
+            setTimeout(() => setPulse(false), 300);
+            setHistory((prev) => [{ timestamp: new Date().toISOString(), count: result.people ?? 0, confidence: result.confidence ?? 0 }, ...prev].slice(0, 30));
+          } catch (e: any) {
+            if (cancelled) return;
+            failures += 1;
+            const status = e?.response?.status;
+            setConnectionError(
+              status === 503 ? 'The AI service is not running on the backend computer.'
+              : status === 401 || status === 403 ? 'Signed out or not allowed. Sign in again.'
+              : failures >= 2 ? 'Cannot reach the server. Retrying...'
+              : null
+            );
+            await sleep(Math.min(5000, 800 * failures)); // back off a little, but keep trying
+          }
+        }
+        await sleep(Math.max(0, MIN_GAP_MS - (performance.now() - started)));
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [cameraOn, centreId, isAdmin, deviceLabel]);
+
+  // Boxes fade out if answers stop arriving
+  React.useEffect(() => {
+    const t = setInterval(() => {
+      if (lastResultAt && Date.now() - lastResultAt > BOX_LIFETIME_MS) setDetections([]);
+    }, 1000);
+    return () => clearInterval(t);
+  }, [lastResultAt]);
+
+  // ── draw the boxes on top of the live picture ─────────────────
+  const drawBoxes = React.useCallback(() => {
+    const canvas = overlayRef.current;
+    const video = videoRef.current;
+    if (!canvas || !video) return;
+    const rect = video.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(rect.width * dpr);
+    canvas.height = Math.round(rect.height * dpr);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, rect.width, rect.height);
+    if (!video.videoWidth || detections.length === 0) return;
+
+    // the picture is letterboxed inside the element (object-fit: contain): work out where it really is
+    const scale = Math.min(rect.width / video.videoWidth, rect.height / video.videoHeight);
+    const dw = video.videoWidth * scale;
+    const dh = video.videoHeight * scale;
+    const ox = (rect.width - dw) / 2;
+    const oy = (rect.height - dh) / 2;
+    ctx.lineWidth = 3;
+    ctx.font = '600 13px Inter, system-ui, sans-serif';
+    for (const d of detections) {
+      const x = ox + d.box[0] * dw;
+      const y = oy + d.box[1] * dh;
+      const w = (d.box[2] - d.box[0]) * dw;
+      const h = (d.box[3] - d.box[1]) * dh;
+      const color = d.label === 'person' ? '#22c55e' : '#fb923c';
+      ctx.strokeStyle = color;
+      ctx.strokeRect(x, y, w, h);
+      const text = `${d.label} ${Math.round(d.confidence * 100)}%`;
+      const tw = ctx.measureText(text).width + 10;
+      ctx.fillStyle = color;
+      ctx.fillRect(x, Math.max(oy, y - 20), tw, 20);
+      ctx.fillStyle = '#0b1220';
+      ctx.fillText(text, x + 5, Math.max(oy, y - 20) + 14);
+    }
+  }, [detections]);
+
+  React.useEffect(() => {
+    drawBoxes();
+    const video = videoRef.current;
+    if (!video || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(drawBoxes);
+    ro.observe(video);
+    return () => ro.disconnect();
+  }, [drawBoxes]);
+
+  const maxCount = Math.max(...history.map((h) => h.count), 1);
+  const saving = !!lastResult?.recorded;
+  const recordingNote = !cameraOn ? null
+    : lastResult?.reason === 'OTHER_CAMERA_ACTIVE' ? `Another camera (${lastResult.countingCamera ?? 'unknown'}) is counting this class, so this view is not saved.`
+    : saving ? 'Saving to attendance'
+    : activeSlot ? 'Waiting for the first answer...'
+    : 'Preview only: nothing is saved until a class is running';
 
   return (
     <div className="flex h-[calc(100vh-72px-3rem)] flex-col gap-3 lg:h-[calc(100vh-72px-4rem)]">
       {/* Header bar */}
-      <div className="flex items-center justify-between flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <span className={cn(
-            'h-2.5 w-2.5 rounded-full',
-            detecting ? 'bg-green-500 animate-pulse' : aiOnline ? 'bg-yellow-500' : 'bg-red-500'
-          )} />
-          <span className="font-semibold text-sm">
-            {sourceMode === 'phone'
-              ? (detecting ? 'Phone Connected' : aiOnline ? 'Waiting for Phone App' : 'AI Service Offline')
-              : (detecting ? 'Detection Active' : aiOnline ? 'AI Ready — Camera Off' : 'AI Service Offline')}
-          </span>
-          <Badge variant="outline" className="text-xs gap-1 hidden sm:flex">
-            {wsConnected
-              ? <><Wifi className="h-3 w-3 text-green-500" /> Live</>
-              : <><WifiOff className="h-3 w-3 text-muted-foreground" /> WS Off</>
-            }
+      <div className="flex flex-shrink-0 flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <span className={cn('h-2.5 w-2.5 rounded-full', cameraOn ? 'bg-green-500 animate-pulse' : 'bg-yellow-500')} />
+          <span className="text-sm font-semibold">{cameraOn ? 'Camera on' : 'Camera off'}</span>
+          <Badge variant="outline" className={cn('gap-1 text-xs', !aiOnline && 'border-red-300 text-red-600')}>
+            {aiOnline ? <><Wifi className="h-3 w-3 text-green-500" /> AI service online</> : <><WifiOff className="h-3 w-3" /> AI service not reachable</>}
           </Badge>
+          {!wsConnected && <Badge variant="outline" className="hidden text-xs text-muted-foreground sm:flex">Live updates reconnecting</Badge>}
           {activeSlot ? (
-            <Badge variant="secondary" className="text-xs gap-1 border-green-500/40">
-              <Clock className="h-3 w-3" /> {activeSlot.name} · {to12h(activeSlot.startTime)} – {to12h(activeSlot.endTime)}
-              {detecting && <span className="text-green-600 font-semibold">· recording to attendance</span>}
+            <Badge variant="secondary" className="gap-1 border-green-500/40 text-xs">
+              <Clock className="h-3 w-3" /> Class live: {activeSlot.name} · {to12h(activeSlot.startTime)} – {to12h(activeSlot.endTime)}
             </Badge>
           ) : (
-            <Badge variant="outline" className="text-xs gap-1 text-muted-foreground">
+            <Badge variant="outline" className="gap-1 text-xs text-muted-foreground">
               <Clock className="h-3 w-3" />
               {nextSlot ? `No class now · next ${nextSlot.name} ${describeNext(nextSlot)}` : 'No class in session'}
-              {detecting && ' · live view only, not recorded'}
             </Badge>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          {lastUpdate && detecting && (
-            <span className="text-xs text-muted-foreground hidden md:block">
-              Updated: {lastUpdate}
-            </span>
+
+        <div className="flex flex-wrap items-center gap-2">
+          {isAdmin && centreOptions.length > 1 && (
+            <select
+              value={adminCentreId}
+              onChange={(e) => { stopCamera(); setAdminCentreId(e.target.value); }}
+              className="h-9 rounded-lg border bg-card px-2 text-xs"
+              aria-label="Centre being filmed"
+            >
+              {centreOptions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
           )}
-
-          {/* ━━━━ CAMERA SOURCE ━━━━ */}
-          <div className="flex rounded-md border overflow-hidden text-xs" role="group" aria-label="Camera source">
-            {([['webcam', 'Laptop webcam'], ['phone', 'Phone app']] as const).map(([mode, label]) => (
-              <button
-                key={mode}
-                type="button"
-                disabled={!aiOnline || switching}
-                onClick={() => switchSource(mode)}
-                className={cn(
-                  'px-3 py-1.5 font-medium transition-colors disabled:opacity-50',
-                  sourceMode === mode ? 'bg-primary text-primary-foreground' : 'bg-background hover:bg-accent'
-                )}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
-
-          {/* ━━━━ START / STOP BUTTON (webcam only) ━━━━ */}
-          {sourceMode === 'webcam' && (
+          {devices.length > 1 && (
+            <select
+              value={deviceId || streamRef.current?.getVideoTracks()[0]?.getSettings().deviceId || ''}
+              onChange={(e) => {
+                setDeviceId(e.target.value);
+                try { localStorage.setItem('live-camera-device', e.target.value); } catch { /* ignore */ }
+                if (cameraOn) { stopCamera(); setTimeout(() => startCamera(), 200); }
+              }}
+              className="h-9 max-w-[200px] rounded-lg border bg-card px-2 text-xs"
+              aria-label="Camera"
+            >
+              {devices.map((d, i) => <option key={d.deviceId} value={d.deviceId}>{d.label || `Camera ${i + 1}`}</option>)}
+            </select>
+          )}
+          <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+            <input type="checkbox" checked={autoStart} onChange={(e) => toggleAutoStart(e.target.checked)} className="h-3.5 w-3.5 accent-current" />
+            Start automatically
+          </label>
           <Button
-            variant={detecting ? 'destructive' : 'default'}
+            variant={cameraOn ? 'destructive' : 'default'}
             size="sm"
-            onClick={toggleDetection}
-            disabled={toggling || !aiOnline}
-            className={cn(
-              'gap-1.5 font-semibold min-w-[140px]',
-              !detecting && aiOnline && 'bg-green-600 hover:bg-green-700 text-white'
-            )}
+            onClick={cameraOn ? stopCamera : startCamera}
+            disabled={starting || !centreId}
+            className="min-w-[140px] gap-1.5 font-semibold"
           >
-            {toggling ? (
-              <><Loader2 className="h-4 w-4 animate-spin" /> {detecting ? 'Stopping...' : 'Starting...'}</>
-            ) : detecting ? (
-              <><Square className="h-4 w-4" /> Stop Camera</>
-            ) : (
-              <><Play className="h-4 w-4" /> Start Camera</>
-            )}
-          </Button>
-          )}
-
-          <Button variant="ghost" size="sm" onClick={poll} className="gap-1 h-7 text-xs">
-            <RefreshCw className="h-3 w-3" />
+            {starting ? <><Loader2 className="h-4 w-4 animate-spin" /> Starting...</>
+              : cameraOn ? <><Square className="h-4 w-4" /> Stop camera</>
+              : <><Play className="h-4 w-4" /> Start camera</>}
           </Button>
         </div>
       </div>
 
       {/* Main content */}
-      <div className="flex gap-3 flex-1 min-h-0">
+      <div className="flex min-h-0 flex-1 gap-3">
+        {/* ── Left: camera ─────────────────────────────────────── */}
+        <div className="flex min-w-0 flex-1 flex-col gap-3">
+          <div className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-border bg-black">
+            <video ref={videoRef} autoPlay playsInline muted className={cn('absolute inset-0 h-full w-full object-contain', !cameraOn && 'invisible')} />
+            <canvas ref={overlayRef} className="pointer-events-none absolute inset-0 h-full w-full" />
 
-        {/* ── Left: Video Feed ─────────────────────────────────── */}
-        <div className="flex-1 flex flex-col gap-3 min-w-0">
-          <div className="relative flex-1 bg-black rounded-xl overflow-hidden border border-border min-h-0">
-            {detecting && !videoError ? (
-              <>
-                <img
-                  ref={imgRef}
-                  src={sourceMode === 'phone' ? `${AI_SERVICE_URL}/snapshot?t=${snapTick}` : videoUrl}
-                  alt="Live annotated camera feed with YOLOv8 people and tool detection"
-                  className="w-full h-full object-contain"
-                  onError={() => setVideoError(true)}
-                  onLoad={() => setVideoError(false)}
-                />
-                <div className="absolute top-3 left-3 flex items-center gap-2">
-                  <div className="bg-red-600 text-white text-xs font-bold px-2 py-0.5 rounded flex items-center gap-1">
-                    <span className="h-1.5 w-1.5 rounded-full bg-white animate-pulse" />
-                    LIVE
-                  </div>
-                  <div className="bg-black/60 text-white text-xs px-2 py-0.5 rounded backdrop-blur-sm">
-                    YOLOv8 • People &amp; Tool Detection
-                  </div>
+            {cameraOn && (
+              <div className="absolute left-3 top-3 flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-1 rounded bg-red-600 px-2 py-0.5 text-xs font-bold text-white">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" /> LIVE
                 </div>
-                <div className="absolute bottom-3 right-3 bg-black/70 backdrop-blur-sm text-white text-xs px-2 py-1 rounded">
-                  {framesProcessed.toLocaleString()} frames
-                </div>
-              </>
-            ) : (
-              <div className="absolute inset-0 flex flex-col items-center justify-center bg-muted/10">
-                {aiOnline ? (
-                  <>
-                    <VideoOff className="h-16 w-16 text-muted-foreground/50 mb-4" />
-                    <p className="text-lg font-medium text-muted-foreground">
-                      {sourceMode === 'phone' ? 'Waiting for the phone app' : 'Camera is off'}
-                    </p>
-                    <p className="text-sm text-muted-foreground mt-1">
-                      {sourceMode === 'phone'
-                        ? <>Open the app and sign in as this centre&apos;s officer. It sends photos while a class is live.</>
-                        : nextSlot
-                        ? <>Next class: <strong>{nextSlot.name}</strong> {describeNext(nextSlot)}. The camera starts automatically then.</>
-                        : <>Click <strong>Start Camera</strong> above to begin AI detection</>}
-                    </p>
-                    <p className="text-xs text-muted-foreground/70 mt-3">
-                      Manual runs outside a class are shown live but not saved to attendance
-                    </p>
-                  </>
+                {latencyMs !== null && (
+                  <div className="rounded bg-black/60 px-2 py-0.5 text-xs text-white backdrop-blur-sm">
+                    count updates every ~{(latencyMs / 1000).toFixed(1)}s
+                  </div>
+                )}
+                {recordingNote && (
+                  <div className={cn('rounded px-2 py-0.5 text-xs backdrop-blur-sm', saving ? 'bg-green-600/80 text-white' : 'bg-black/60 text-white')}>
+                    {recordingNote}
+                  </div>
+                )}
+              </div>
+            )}
+            {cameraOn && connectionError && (
+              <div className="absolute bottom-3 left-3 right-3 flex items-center gap-2 rounded-lg bg-red-600/90 px-3 py-2 text-sm text-white">
+                <AlertTriangle className="h-4 w-4 shrink-0" /> {connectionError}
+              </div>
+            )}
+
+            {!cameraOn && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 px-6 text-center">
+                <VideoOff className="mb-3 h-14 w-14 text-muted-foreground/50" />
+                <p className="text-lg font-medium text-muted-foreground">Camera is off</p>
+                {cameraError ? (
+                  <p className="max-w-md text-sm text-red-400">{cameraError}</p>
+                ) : activeSlot ? (
+                  <p className="max-w-md text-sm text-muted-foreground">
+                    A class is live now: <strong>{activeSlot.name}</strong> ({to12h(activeSlot.startTime)} – {to12h(activeSlot.endTime)}).
+                    Press <strong>Start camera</strong> so attendance is counted.
+                  </p>
+                ) : nextSlot ? (
+                  <p className="max-w-md text-sm text-muted-foreground">
+                    No class right now. Next: <strong>{nextSlot.name}</strong> {describeNext(nextSlot)}. You can start the camera for a preview;
+                    nothing is saved until a class is running.
+                  </p>
                 ) : (
-                  <>
-                    <PowerOff className="h-16 w-16 text-muted-foreground/40 mb-4" />
-                    <p className="text-lg font-medium text-muted-foreground">
-                      AI Service not running
-                    </p>
-                    <p className="text-sm text-muted-foreground mt-1 text-center max-w-xs">
-                      Run <code className="bg-muted px-1.5 py-0.5 rounded text-xs">python ai-service/detector.py</code>
-                    </p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="mt-4 gap-1.5"
-                      onClick={() => { setVideoError(false); poll(); }}
-                    >
-                      <RefreshCw className="h-4 w-4" /> Check Again
-                    </Button>
-                  </>
+                  <p className="max-w-md text-sm text-muted-foreground">No classes are scheduled for this centre. Press Start camera for a preview.</p>
                 )}
               </div>
             )}
           </div>
 
-          {/* Mini history bar chart */}
           <Card className="flex-shrink-0">
             <CardContent className="p-3">
               <div className="flex items-center gap-3">
-                <Activity className="h-4 w-4 text-primary flex-shrink-0" />
-                <div className="flex-1 flex items-end gap-0.5 h-10">
-                  {history.slice(0, 20).reverse().map((h, i, arr) => {
-                    const pct = Math.max((h.count / maxCount) * 100, 5);
-                    const isLatest = i === arr.length - 1;
-                    return (
-                      <div
-                        key={i}
-                        className={cn(
-                          'flex-1 rounded-sm transition-all duration-300',
-                          isLatest ? 'bg-primary' : 'bg-primary/30'
-                        )}
-                        style={{ height: `${pct}%` }}
-                        title={`${h.count} persons at ${new Date(h.timestamp).toLocaleTimeString()}`}
-                      />
-                    );
-                  })}
+                <Activity className="h-4 w-4 flex-shrink-0 text-primary" />
+                <div className="flex h-10 flex-1 items-end gap-0.5">
+                  {history.slice(0, 20).reverse().map((h, i, arr) => (
+                    <div
+                      key={i}
+                      className={cn('flex-1 rounded-sm transition-all duration-300', i === arr.length - 1 ? 'bg-primary' : 'bg-primary/30')}
+                      style={{ height: `${Math.max((h.count / maxCount) * 100, 5)}%` }}
+                      title={`${h.count} people at ${new Date(h.timestamp).toLocaleTimeString()}`}
+                    />
+                  ))}
                   {history.length === 0 && (
-                    <span className="text-xs text-muted-foreground mx-auto">
-                      {detecting ? 'Waiting for first detection...' : 'Start camera to begin'}
-                    </span>
+                    <span className="mx-auto text-xs text-muted-foreground">{cameraOn ? 'Waiting for the first count...' : 'Start the camera to begin'}</span>
                   )}
                 </div>
-                <span className="text-xs text-muted-foreground flex-shrink-0 hidden sm:block">
-                  Last {Math.min(history.length, 20)} detections
-                </span>
+                <span className="hidden flex-shrink-0 text-xs text-muted-foreground sm:block">Last {Math.min(history.length, 20)} counts</span>
               </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* ── Right: Stats Panel ───────────────────────────────── */}
-        <div className="w-64 flex-shrink-0 flex flex-col gap-3 overflow-y-auto">
-          {/* Current class: people in the room vs expected */}
+        {/* ── Right: numbers ───────────────────────────────────── */}
+        <div className="flex w-64 flex-shrink-0 flex-col gap-3 overflow-y-auto">
           <CurrentClassPanel sessions={todaySessions} compact />
 
-          {/* Big Count */}
           <Card className="flex-shrink-0">
             <CardContent className="p-5 text-center">
-              <Users className="h-8 w-8 text-primary mx-auto mb-2" />
-              <div className={cn(
-                'text-7xl font-black tabular-nums leading-none transition-all duration-200',
-                pulse && 'scale-110 text-green-500',
-                !detecting && 'text-muted-foreground/40'
-              )}>
-                {detecting ? count : '—'}
+              <Users className="mx-auto mb-2 h-8 w-8 text-primary" />
+              <div className={cn('text-7xl font-black leading-none tabular-nums transition-all duration-200', pulse && 'scale-110 text-green-500', !cameraOn && 'text-muted-foreground/40')}>
+                {cameraOn ? count : '—'}
               </div>
-              <p className="text-xs font-medium text-muted-foreground mt-2 uppercase tracking-wider">
-                Persons Detected
-              </p>
-              {confidence > 0 && detecting && (
+              <p className="mt-2 text-xs font-medium uppercase tracking-wider text-muted-foreground">People in the picture</p>
+              {confidence > 0 && cameraOn && (
                 <div className="mt-3 space-y-1">
                   <div className="flex items-center justify-between text-xs">
-                    <span className="text-muted-foreground">Avg Confidence</span>
+                    <span className="text-muted-foreground">Avg confidence</span>
                     <span className="font-medium">{Math.round(confidence * 100)}%</span>
                   </div>
-                  <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-green-500 rounded-full transition-all"
-                      style={{ width: `${Math.round(confidence * 100)}%` }}
-                    />
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                    <div className="h-full rounded-full bg-green-500 transition-all" style={{ width: `${Math.round(confidence * 100)}%` }} />
                   </div>
                 </div>
               )}
             </CardContent>
           </Card>
 
-          {/* Quick stats */}
-          <div className="grid grid-cols-2 gap-2 flex-shrink-0">
+          <div className="grid flex-shrink-0 grid-cols-2 gap-2">
             <Card>
               <CardContent className="p-3 text-center">
-                <Zap className="h-4 w-4 text-yellow-500 mx-auto mb-1" />
-                <p className="text-lg font-bold">{activeSlot ? to12h(activeSlot.endTime) : '—'}</p>
-                <p className="text-xs text-muted-foreground">Class ends</p>
+                <Zap className="mx-auto mb-1 h-4 w-4 text-yellow-500" />
+                <p className="text-lg font-bold">{latencyMs !== null && cameraOn ? `${(latencyMs / 1000).toFixed(1)}s` : '—'}</p>
+                <p className="text-xs text-muted-foreground">Per count</p>
               </CardContent>
             </Card>
             <Card>
               <CardContent className="p-3 text-center">
-                <CheckCircle2 className="h-4 w-4 text-green-500 mx-auto mb-1" />
-                <p className="text-lg font-bold">YOLOv8</p>
-                <p className="text-xs text-muted-foreground">Model</p>
+                <CheckCircle2 className={cn('mx-auto mb-1 h-4 w-4', saving ? 'text-green-500' : 'text-muted-foreground')} />
+                <p className="text-lg font-bold">{saving ? 'Yes' : 'No'}</p>
+                <p className="text-xs text-muted-foreground">Saved</p>
               </CardContent>
             </Card>
           </div>
 
-          {/* Equipment & Infrastructure Items */}
           <Card className="flex-shrink-0">
-            <CardHeader className="p-3 pb-1.5 flex flex-row items-center justify-between space-y-0">
-              <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-                <Package className="h-3.5 w-3.5 text-primary" />
-                Equipment / Items
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 p-3 pb-1.5">
+              <CardTitle className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                <Package className="h-3.5 w-3.5 text-primary" /> Equipment / Items
               </CardTitle>
-              <Badge variant="outline" className="text-[10px] h-4 px-1.5 font-mono">
-                {items.length} {items.length === 1 ? 'type' : 'types'}
-              </Badge>
+              <Badge variant="outline" className="h-4 px-1.5 font-mono text-[10px]">{items.length} {items.length === 1 ? 'type' : 'types'}</Badge>
             </CardHeader>
             <CardContent className="p-3 pt-1">
               {items.length === 0 ? (
-                <p className="text-xs text-muted-foreground text-center py-2 italic">
-                  {detecting ? 'Scanning for items in room...' : 'Camera standby'}
-                </p>
+                <p className="py-2 text-center text-xs italic text-muted-foreground">{cameraOn ? 'Scanning for items in the room...' : 'Camera off'}</p>
               ) : (
-                <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto">
+                <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
                   {items.map((it, idx) => (
-                    <Badge key={idx} variant="secondary" className="text-xs gap-1 py-0.5 px-2 font-normal">
+                    <Badge key={idx} variant="secondary" className="gap-1 px-2 py-0.5 text-xs font-normal">
                       <span className="font-semibold capitalize text-foreground">{it.name}</span>
-                      <span className="bg-primary/15 text-primary px-1 rounded text-[10px] font-bold">
-                        {it.count}
-                      </span>
+                      <span className="rounded bg-primary/15 px-1 text-[10px] font-bold text-primary">{it.count}</span>
                     </Badge>
                   ))}
                 </div>
@@ -534,24 +581,22 @@ export function LiveCameraPage() {
             </CardContent>
           </Card>
 
-          {/* Registered tools vs what the camera sees right now */}
           {registeredTools.length > 0 && (
             <Card className="flex-shrink-0">
               <CardHeader className="p-3 pb-1.5">
-                <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wider flex items-center gap-1.5">
-                  <Wrench className="h-3.5 w-3.5 text-primary" />
-                  Tools vs expected
+                <CardTitle className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  <Wrench className="h-3.5 w-3.5 text-primary" /> Tools vs expected
                 </CardTitle>
               </CardHeader>
-              <CardContent className="p-3 pt-1 space-y-1.5">
+              <CardContent className="space-y-1.5 p-3 pt-1">
                 {registeredTools.map((tool) => {
                   const seen = items.find((it) => it.name.toLowerCase() === tool.detectClass.toLowerCase())?.count ?? 0;
-                  const ok = detecting && seen >= tool.quantity;
+                  const ok = cameraOn && seen >= tool.quantity;
                   return (
-                    <div key={tool.id} className="flex items-center justify-between text-xs gap-2">
+                    <div key={tool.id} className="flex items-center justify-between gap-2 text-xs">
                       <span className="truncate">{tool.name}</span>
-                      <span className={cn('font-mono font-semibold', !detecting ? 'text-muted-foreground' : ok ? 'text-green-600' : 'text-amber-600')}>
-                        {detecting ? seen : '—'} / {tool.quantity}
+                      <span className={cn('font-mono font-semibold', !cameraOn ? 'text-muted-foreground' : ok ? 'text-green-600' : 'text-amber-600')}>
+                        {cameraOn ? seen : '—'} / {tool.quantity}
                       </span>
                     </div>
                   );
@@ -560,43 +605,21 @@ export function LiveCameraPage() {
             </Card>
           )}
 
-          {/* Detection Log */}
-          <Card className="flex-1 min-h-0">
+          <Card className="min-h-0 flex-1">
             <CardHeader className="p-3 pb-1.5">
-              <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                Detection Log
-              </CardTitle>
+              <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Count log</CardTitle>
             </CardHeader>
-            <CardContent className="p-0 overflow-y-auto" style={{ maxHeight: '320px' }}>
+            <CardContent className="overflow-y-auto p-0" style={{ maxHeight: '320px' }}>
               {history.length === 0 ? (
-                <p className="text-xs text-muted-foreground text-center py-6">
-                  {detecting ? 'Waiting...' : 'No detections yet'}
-                </p>
+                <p className="py-6 text-center text-xs text-muted-foreground">{cameraOn ? 'Waiting...' : 'No counts yet'}</p>
               ) : (
                 <div className="divide-y">
                   {history.map((e, i) => (
-                    <div
-                      key={i}
-                      className={cn(
-                        'flex items-center justify-between px-3 py-2 text-xs gap-2',
-                        i === 0 && 'bg-primary/5'
-                      )}
-                    >
-                      <span className="text-muted-foreground font-mono text-[10px] flex-shrink-0">
-                        {new Date(e.timestamp).toLocaleTimeString()}
-                      </span>
-                      <div className="flex items-center gap-1 font-medium">
-                        <Users className="h-3 w-3" />
-                        {e.count}
-                      </div>
-                      <span className="text-muted-foreground flex-shrink-0">
-                        {Math.round(e.confidence * 100)}%
-                      </span>
-                      {i === 0 && (
-                        <Badge variant="outline" className="text-[9px] h-4 px-1 flex-shrink-0">
-                          latest
-                        </Badge>
-                      )}
+                    <div key={i} className={cn('flex items-center justify-between gap-2 px-3 py-2 text-xs', i === 0 && 'bg-primary/5')}>
+                      <span className="flex-shrink-0 font-mono text-[10px] text-muted-foreground">{new Date(e.timestamp).toLocaleTimeString()}</span>
+                      <div className="flex items-center gap-1 font-medium"><Users className="h-3 w-3" />{e.count}</div>
+                      <span className="flex-shrink-0 text-muted-foreground">{Math.round(e.confidence * 100)}%</span>
+                      {i === 0 && <Badge variant="outline" className="h-4 flex-shrink-0 px-1 text-[9px]">latest</Badge>}
                     </div>
                   ))}
                 </div>
@@ -604,21 +627,12 @@ export function LiveCameraPage() {
             </CardContent>
           </Card>
 
-          {/* Info card */}
           <Card className="flex-shrink-0 bg-muted/30">
             <CardContent className="p-3">
-              <p className="text-[10px] text-muted-foreground leading-relaxed">
-                <strong>YOLOv8</strong> • People &amp; tool detection • Reports every 10s.
-                Camera is <strong>{detecting ? 'ON' : 'OFF'}</strong>{detecting && autoStarted ? ' (started by class schedule)' : ''}.
+              <p className="text-[10px] leading-relaxed text-muted-foreground">
+                The camera is opened by this web page. A small picture goes to the server about once a second; people and tools are counted there.
+                Counts are saved to attendance only while a class is running.
               </p>
-              <a
-                href={`${AI_SERVICE_URL}/status`}
-                target="_blank"
-                rel="noreferrer"
-                className="text-[10px] text-primary flex items-center gap-0.5 mt-1.5 hover:underline"
-              >
-                AI Service Status <ChevronRight className="h-2.5 w-2.5" />
-              </a>
             </CardContent>
           </Card>
         </div>

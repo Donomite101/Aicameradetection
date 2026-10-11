@@ -1,6 +1,6 @@
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { FastifyInstance } from 'fastify';
-import { verify } from 'jsonwebtoken';
+import { resolveSessionUser, SessionUser } from '@/modules/auth/service';
 import { createServer } from 'http';
 import { config } from '@/config';
 
@@ -28,45 +28,48 @@ export function initializeWebSocket(fastify: FastifyInstance): SocketIOServer {
 
   ioInstance = io;
 
+  // Put an authenticated user's socket into the rooms that decide which events it receives
+  const attachUser = (socket: AuthenticatedSocket, user: SessionUser) => {
+    socket.userId = user.userId;
+    socket.role = user.role;
+    socket.centreId = user.centreId;
+
+    if (!userSockets.has(user.userId)) userSockets.set(user.userId, new Set());
+    userSockets.get(user.userId)!.add(socket.id);
+
+    if (user.centreId) {
+      socket.join(`centre:${user.centreId}`);
+      if (!centreSockets.has(user.centreId)) centreSockets.set(user.centreId, new Set());
+      centreSockets.get(user.centreId)!.add(socket.id);
+    }
+    socket.join(`role:${user.role}`);
+  };
+
+  // The browser sends its token in the connection handshake. Reading it here is what makes live events work at all:
+  // before, nothing ever authenticated the socket, so it never joined a room and received no event.
+  io.use(async (socket: AuthenticatedSocket, next) => {
+    const token = socket.handshake.auth?.token;
+    if (!token) return next(); // may connect, but receives nothing until it authenticates
+    const user = await resolveSessionUser(String(token));
+    if (!user) return next(new Error('Invalid or expired token'));
+    attachUser(socket, user);
+    next();
+  });
+
   io.on('connection', (socket: AuthenticatedSocket) => {
-    console.log(`🔌 Client connected: ${socket.id}`);
+    console.log(`🔌 Client connected: ${socket.id}${socket.userId ? ` (${socket.role})` : ''}`);
+    if (socket.userId) socket.emit('authenticated', { success: true });
 
-    socket.on('authenticate', (token: string) => {
-      try {
-        const decoded = verify(token, config.JWT_SECRET) as {
-          userId: string;
-          role: string;
-          centreId?: string;
-        };
-
-        socket.userId = decoded.userId;
-        socket.role = decoded.role;
-        socket.centreId = decoded.centreId;
-
-        // Track user sockets
-        if (!userSockets.has(decoded.userId)) {
-          userSockets.set(decoded.userId, new Set());
-        }
-        userSockets.get(decoded.userId)!.add(socket.id);
-
-        // Track centre sockets for centre-specific rooms
-        if (decoded.centreId) {
-          socket.join(`centre:${decoded.centreId}`);
-          if (!centreSockets.has(decoded.centreId)) {
-            centreSockets.set(decoded.centreId, new Set());
-          }
-          centreSockets.get(decoded.centreId)!.add(socket.id);
-        }
-
-        // Join role-based rooms
-        socket.join(`role:${decoded.role}`);
-
-        socket.emit('authenticated', { success: true });
-        console.log(`✅ Socket ${socket.id} authenticated as ${decoded.role} (${decoded.userId})`);
-      } catch (err) {
+    // Still supported for clients that connect first and authenticate afterwards
+    socket.on('authenticate', async (token: string) => {
+      const user = await resolveSessionUser(String(token || ''));
+      if (!user) {
         socket.emit('authenticated', { success: false, error: 'Invalid token' });
         socket.disconnect();
+        return;
       }
+      attachUser(socket, user);
+      socket.emit('authenticated', { success: true });
     });
 
     socket.on('join-centre', (centreId: string) => {

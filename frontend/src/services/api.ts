@@ -1,11 +1,13 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { getAuthTokens, setAuthTokens, clearAuthTokens } from '@/store/auth';
 
-// Open the page on this computer and requests go to the same address (Vite / nginx forward /api to the backend).
-// Sending them out to the public tunnel and back would add an internet round trip to every single request.
-const onThisComputer = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
-const API_URL = onThisComputer ? '' : import.meta.env.VITE_API_URL || '';
+// Where the backend is. Set VITE_API_URL when the backend runs on another machine
+// (e.g. http://<backend-laptop-ip>:3000 on the same Wi-Fi, or the ngrok URL from outside).
+// Left empty, requests go to this page's own address and Vite / nginx forward /api to the backend.
+const API_URL = import.meta.env.VITE_API_URL || '';
 const API_PREFIX = '/api/v1';
+
+export const API_BASE = `${API_URL}${API_PREFIX}`;
 
 export const api: any = axios.create({
   baseURL: `${API_URL}${API_PREFIX}`,

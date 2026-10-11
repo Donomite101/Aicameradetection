@@ -2,9 +2,8 @@ import { io, Socket } from 'socket.io-client';
 import { getAuthTokens } from '@/store/auth';
 import { useAuthStore } from '@/store/auth';
 
-// Same idea as the API: on this computer use the page's own address (Vite forwards /ws to the backend)
-const onThisComputer = ['localhost', '127.0.0.1', '[::1]'].includes(window.location.hostname);
-const WS_URL: string | undefined = onThisComputer ? undefined : import.meta.env.VITE_WS_URL || undefined;
+// Same as the API: VITE_WS_URL when the backend is elsewhere, otherwise this page's own address (Vite forwards /ws)
+const WS_URL: string | undefined = import.meta.env.VITE_WS_URL || import.meta.env.VITE_API_URL || undefined;
 
 class WebSocketService {
   private socket: Socket | null = null;

@@ -21,7 +21,8 @@ export const listAttendanceSchema = z.object({
     search: z.string().optional().or(z.literal('')),
     startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal('')),
     endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional().or(z.literal('')),
-    session: z.enum(['MORNING', 'AFTERNOON', 'EVENING', 'FULL_DAY']).optional().or(z.literal('')),
+    session: z.string().optional(),
+    classSlotId: z.string().optional().or(z.literal('')),
     status: z.enum(['PENDING', 'VERIFIED', 'DISCREPANT', 'UNDER_REVIEW']).optional().or(z.literal('')),
     sortBy: z.enum(['date', 'createdAt', 'recordedCount', 'detectedCount']).default('date'),
     sortOrder: z.enum(['asc', 'desc']).default('desc'),
@@ -33,7 +34,6 @@ export const updateAttendanceSchema = z.object({
   body: z.object({
     recordedCount: z.number().int().nonnegative().optional(),
     status: z.enum(['PENDING', 'VERIFIED', 'DISCREPANT', 'UNDER_REVIEW']).optional(),
-    verifiedBy: z.string().optional(),
   }),
 });
 

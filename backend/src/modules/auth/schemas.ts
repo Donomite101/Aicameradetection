@@ -17,6 +17,12 @@ export const registerSchema = z.object({
   }),
 });
 
+export const updateProfileSchema = z.object({
+  body: z.object({
+    fullName: z.string().min(2).max(100),
+  }),
+});
+
 export const refreshTokenSchema = z.object({
   body: z.object({
     refreshToken: z.string(),

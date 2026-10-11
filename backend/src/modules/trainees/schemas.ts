@@ -50,7 +50,7 @@ export const listTraineesSchema = z.object({
 export const markAttendanceSchema = z.object({
   body: z.object({
     date: z.string().optional(), // YYYY-MM-DD
-    session: z.enum(['MORNING', 'AFTERNOON', 'EVENING', 'FULL_DAY']).default('FULL_DAY'),
+    session: z.string().min(1).max(100).default('FULL_DAY'), // FULL_DAY or a class slot name
     records: z.array(
       z.object({
         traineeId: z.string(),
@@ -64,7 +64,7 @@ export const markAttendanceSchema = z.object({
 export const listTraineeAttendanceSchema = z.object({
   query: z.object({
     date: z.string().optional(),
-    session: z.enum(['MORNING', 'AFTERNOON', 'EVENING', 'FULL_DAY']).optional().or(z.literal('')),
+    session: z.string().optional(),
     centreId: z.string().optional().or(z.literal('')),
     traineeId: z.string().optional().or(z.literal('')),
   }),

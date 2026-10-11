@@ -74,8 +74,12 @@ export async function createInfrastructureCheck(data: {
   thumbnailUrl?: string;
   metadata?: Record<string, unknown>;
 }) {
+  const { metadata, ...rest } = data;
   return prisma.infrastructureCheck.create({
-    data,
+    data: {
+      ...rest,
+      metadata: metadata ? JSON.stringify(metadata) : undefined,
+    },
     include: { centre: true, item: true },
   });
 }

@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { dashboardApi } from '@/services/api';
+import { aiApi } from '@/services/ai';
 import { useAuthStore } from '@/store/auth';
 import { ws } from '@/services/websocket';
 import type { DashboardSummary, TodaySession } from '@/types';
@@ -16,7 +17,6 @@ import { formatDistanceToNow } from 'date-fns';
 import { to12h } from '@/components/ClassSessionScheduleBanner';
 import { CurrentClassPanel } from '@/components/CurrentClassPanel';
 
-const AI_SERVICE_URL = import.meta.env.VITE_AI_SERVICE_URL || 'http://localhost:8000';
 
 const statCards = [
   { key: 'totalCentres', label: 'Total Centres', icon: Building2, color: 'bg-blue-500', trend: '+2.1%' },
@@ -137,13 +137,8 @@ function LiveCameraWidget() {
     let mounted = true;
     const check = async () => {
       try {
-        const res = await fetch(`${AI_SERVICE_URL}/status`, { signal: AbortSignal.timeout(2000) });
-        if (res.ok) {
-          const data = await res.json();
-          if (mounted) setStatus({ active: data.sourceMode === 'phone' ? !!data.phoneActive : data.active, currentCount: data.currentCount, online: true });
-        } else {
-          if (mounted) setStatus({ active: false, currentCount: 0, online: false });
-        }
+        const data: any = await aiApi.status();
+        if (mounted) setStatus({ active: !!data.remoteActive || !!data.active, currentCount: data.currentCount, online: true });
       } catch {
         if (mounted) setStatus({ active: false, currentCount: 0, online: false });
       }
@@ -302,14 +297,14 @@ export function DashboardPage() {
                 Site Officer Portal
               </span>
               <span className="text-xs text-muted-foreground font-mono">
-                {user?.centre?.code || summary.centre?.code || 'Assigned Site'}
+                {summary.centre?.code || user?.centre?.code || 'Assigned Site'}
               </span>
             </div>
             <h1 className="text-xl font-bold mt-1">
               Welcome back, {user?.fullName || 'Officer'}
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Centre: {user?.centre?.name || summary.centre?.name || 'Monitoring Site'} ({user?.centre?.city || summary.centre?.city || 'HQ'})
+              Centre: {summary.centre?.name || user?.centre?.name || 'Monitoring Site'} ({summary.centre?.city || user?.centre?.city || 'HQ'})
             </p>
           </div>
 
